@@ -1,0 +1,18 @@
+{
+    "appenders": {
+      "system": {
+        "type": "dateFile",
+        "filename": "log/system.log",
+        "pattern": "-yyyy-MM-dd",
+        "alwaysIncludePattern": true
+      }
+    },
+    "categories": {
+      "default": {
+        "appenders": [
+          "system"
+        ],
+        "level": "all"
+      }
+    }
+}

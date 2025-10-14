@@ -1,0 +1,195 @@
+.schema-buttons {
+  margin: 0;
+  top: 4.3rem;
+  width: 100%;
+  position: fixed;
+  background-color: #f9f9f9;
+  z-index: 150;
+  padding: 0rem;
+}
+
+.schema-inner {
+  width: 96%;
+  padding: 0rem;
+  margin: 0 2% 0 2%;
+  display: flex;
+  height: auto;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.schema-main {
+  margin-top: 7.7rem;
+}
+
+.flex {
+  display: flex;
+}
+
+div.schema-tree {
+  width: 24rem;
+  max-height: 100%;
+  min-height: 1.5rem;
+  overflow-y: auto;
+}
+
+fieldset.schema-tree {
+  min-width: 25.5rem;
+  max-height: calc(100vh - 11rem);
+  min-height: 14.25rem;
+}
+
+div.schema-detail {
+  margin: 0px 15px;
+  flex-grow: 1;
+}
+
+fieldset.schema-detail {
+  min-width: 46rem;
+}
+
+.relation-table {
+  width: 70%;
+}
+
+.sortable-table {
+  width: calc(30rem + 6rem + 19px);
+  table-layout: fixed;
+}
+
+.sortable-table-head {
+  height: 2rem;
+  width: auto;
+  background: #dcdcdc;
+  border: 1px solid #a0a0a0;
+  border-bottom: none;
+}
+
+.sortable-table-row,
+.sortable-table-row-disabled,
+.sortable-table-row-dragging {
+  height: 2rem;
+  width: auto;
+  border-bottom: 1px solid #a0a0a0;
+  border-right: 1px solid #a0a0a0;
+  background: white;
+}
+
+.version-table-row {
+  height: 2.5rem;
+  width: auto;
+  border-bottom: 1px solid #a0a0a0;
+  border-right: 1px solid #a0a0a0;
+  background: white;
+}
+
+.sortable-table-row-disabled {
+  background: gray;
+}
+
+.sortable-table-row-dragging {
+  border: 1px solid #a0a0a0;
+}
+
+.sortable-table-head > th:nth-child(1) {
+  padding-left: 10px;
+}
+.sortable-table-head > th:nth-child(2) {
+  text-align: center;
+}
+
+.sortable-table-body {
+  max-height: 11rem; /* 5.5行分 */
+  min-height: 2rem;
+  overflow-y: scroll;
+  border: 1px solid #a0a0a0;
+}
+
+.sortable-table-cell1 {
+  width: 30rem;
+  min-width: 200px;
+  padding-left: 5px;
+}
+
+.sortable-table-cell1 > div {
+  display: flex;
+  align-items: center;
+}
+
+.sortable-table-cell2 {
+  width: 6rem;
+  text-align: center;
+}
+
+.sortable-table-cell3 {
+  width: 6rem;
+  text-align: center;
+}
+
+.sortable-table-cell4 {
+  width: 12rem;
+  text-align: center;
+}
+
+.sortable-table-cell5 {
+  width: 2rem;
+  text-align: center;
+}
+
+.sortable-table-cell6 {
+  width: 4rem;
+  text-align: center;
+}
+
+.drag-icon-style {
+  margin-right: 5px;
+}
+
+.show-flg-checkbox {
+  margin: 0px;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.version-download {
+  padding: 3px 6px;
+}
+
+div.caption-and-block {
+  display: flex;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+div.caption-and-block > span:nth-child(1) {
+  width: 9rem;
+}
+
+div.caption-and-block-long {
+  display: flex;
+  height: 2rem;
+}
+div.caption-and-block-long > span:nth-child(1) {
+  width: 13rem;
+}
+
+fieldset.schema-manager-legend {
+  min-height: 4rem;
+  padding: 0.35em 0.625em 0.75em;
+  margin: 0px 10px 10px 0px;
+  border: 1px solid #a0a0a0;
+}
+
+fieldset.schema-manager-legend > legend {
+  margin-bottom: 0px;
+  border-bottom: none;
+  font-size: 1rem;
+  font-weight: bold;
+}
+
+.nomargin {
+  margin: 0px;
+}
+
+.SchemaManagerSaveButtonGroup {
+  text-align: right;
+}

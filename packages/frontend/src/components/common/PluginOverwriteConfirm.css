@@ -1,0 +1,56 @@
+.confirm-table {
+  border-bottom: 1px solid #c0c0c0;
+  display: table;
+  width: auto;
+}
+
+.confirm-tr {
+  display: table-row;
+  width: auto;
+}
+
+.confirm-th {
+  width: auto;
+  height: 1.5rem;
+  background: #dcdcdc;
+  border: 1px solid #c0c0c0;
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.confirm-td {
+  max-width: 20rem;
+  text-align: left;
+  border: 1px solid #c0c0c0;
+  border-bottom: none;
+  padding: 0.5rem;
+}
+
+.aligh-center {
+  text-align: center !important;
+}
+
+.modal-inner-element {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.modal-size {
+  width: auto;
+  max-width: 900px;
+  min-width: 300px;
+}
+
+.overwrite-checkbox {
+  margin-top: 0px !important;
+  margin-bottom: 0px !important;
+  font-weight: bold;
+}
+
+.overwrite-checkbox > label {
+  font-weight: bold !important;
+}
+
+.overwrite-schema-title {
+  font-weight: bold;
+}

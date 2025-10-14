@@ -1,0 +1,300 @@
+body {
+  background: #f9f9f9;
+}
+
+.page-area {
+  padding: 15px;
+}
+
+/* TODO レスポンシブ未対応 */
+.patient-area {
+  /* position: fixed; */
+  top: 0;
+  left: 0;
+  /*余白が入らないように*/
+  margin: 0;
+  padding: 5px;
+  width: 100%;
+  /* height: 115px; */
+  height: auto;
+  background-color: #f9f9f9;
+  /* 常に最前面に表示 */
+  z-index: 999;
+}
+
+.patient-area-panel {
+  display: flex;
+}
+
+.content-area {
+  display: flex;
+}
+
+.input-form {
+  width: 100%;
+  margin-right: 10px;
+}
+
+.panel-style {
+  padding: 15px;
+  border: 1px solid #a0a0a0;
+  background: white;
+}
+
+.panel-item-style {
+  padding-top: 10px;
+  padding-left: 30px;
+  padding-right: 30px;
+}
+
+/* エラーメッセージ表示パネル */
+.error-msg-panel,
+.error-msg-panel-sm {
+  border: solid thin red;
+  color: #a94442;
+  padding: 0.5rem;
+}
+
+.error-msg-panel-sm {
+  margin-bottom: 1rem;
+}
+
+.error-msg-jesgo-err-div {
+  display: flex;
+  align-items: center;
+  margin: 1px 0px
+}
+
+.error-msg-btn-delete {
+  margin: 0px 0px 0px 20px;
+  cursor: pointer;
+}
+
+.user-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-right: 20px;
+  /* padding-top: 10px; */
+}
+
+.setting-row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: 20px;
+  /* padding-top: 10px; */
+}
+
+.user-info-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  align-items: center;
+}
+
+.setting-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.user-info-col {
+  min-width: 200px;
+  margin-left: 20px;
+}
+
+.user-info-age {
+  /* 他コントロールと縦位置を揃えるためリセット */
+  padding: 0px;
+  margin: 0px 0px 0px 20px;
+  min-width: 50px;
+}
+
+.user-info-checkbox {
+  /* 他コントロールと縦位置を揃えるためリセット */
+  padding: 0px;
+  margin: 0px;
+  margin: 0px 0px 0px 20px;
+  min-width: 80px;
+}
+
+.no-checkbox-auto-styling{
+  /* 自動で付与されるスタイルを防ぐ */
+  margin: 0px 0px 0px 20px
+}
+
+
+.checkbox.no-checkbox-auto-styling+.checkbox {
+  /* 自動で付与されるスタイルを防ぐ */
+  margin: 0px 0px 0px 20px;
+}
+
+.user-info-button-col {
+  display: table;
+  margin-left: auto;
+}
+
+.user-info-button-div {
+  display: flex;
+  vertical-align: middle;
+  justify-content: right;
+  flex-wrap: wrap;
+}
+
+/* ---タブ--- */
+
+/* タブとコンテンツの間が空いてしまう問題を対応 */
+.nav-tabs li {
+  margin-bottom: -2px;
+}
+
+/* タブ（未選択） */
+.nav-tabs li a {
+  background-color: #73a5ce;
+  color: white;
+}
+
+/* タブ（選択） */
+.nav-tabs li.active a {
+  font-weight: normal;
+  border: 1px solid #a0a0a0;
+}
+.nav-tabs li.active a:focus {
+  font-weight: normal;
+  border: 1px solid #a0a0a0;
+}
+.nav-tabs li.active a:hover {
+  font-weight: normal;
+  border: 1px solid #a0a0a0;
+}
+
+/* フォームデータ入力済み時のタブフォント */
+a.has-input {
+  font-weight: bold !important;
+  color: black !important;
+}
+
+/* アイテム間の隙間 */
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-group > fieldset > div {
+  margin-left: 5px;
+  margin-bottom: 10px;
+}
+
+.form-group fieldset legend {
+  border-bottom: 3px solid #e5e5e5;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'BIZ-UDPGothic';
+}
+
+/* 数値入力(入力部分のみ) */
+.input-integer input {
+  width: 100px;
+  font-family: 'BIZ-UDPGothic';
+}
+
+.input-integer select {
+  width: auto;
+  font-family: 'BIZ-UDPGothic';
+}
+
+.input-integer select {
+  width: auto;
+}
+
+/* 日付入力(入力部分のみ) */
+.input-date input[type='date'] {
+  width: 200px;
+  font-family: 'BIZ-UDPGothic';
+}
+
+/* input */
+.input-text input[type='text'] {
+  width: auto;
+  min-width: 200px;
+  font-family: 'BIZ-UDPGothic';
+}
+.input-text select {
+  width: auto;
+  min-width: 200px;
+  max-width: 100%;
+  font-family: 'BIZ-UDPGothic';
+}
+
+/* 必須項目のスタイル */
+.required-item input,
+.required-item select {
+  border-color: red;
+}
+
+/* 必須項目のスタイル(階層コンボ用) */
+.required-item fieldset,
+.required-item fieldset:hover {
+  border-color: red !important;
+}
+
+.MuiOutlinedInput-root > fieldset:hover {
+  border-color: red !important;
+}
+
+/* jesgo:ui:visibleWhen
+※条件に当てはまらない場合このスタイルが付与される
+*/
+.visiblewhen-hidden .visiblewhen, .visiblewhen-item {
+  display: none;
+}
+
+.sidebar {
+  display: none;
+}
+
+@media screen and (min-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 211px;
+    bottom: 0;
+    left: 0;
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}
+
+/* スピンボタンの非表示 */
+/* Chrome, Safari */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* FireFox，IE */
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* validationエラー時のスタイル */
+.has-error > .form-control,
+.has-error > .control-label,
+.has-error legend {
+  color: red;
+}
+
+/* textarea 横方向へのリサイズ抑制 */
+textarea.form-control {
+  resize: vertical;
+}
+
+/* 階層付きラジオボタンのdiv */
+div.radio-item-div {
+  margin-left: 10px;
+}
+
+/* 階層付きラジオボタンのlabel */
+label.radio-label {
+  margin-top: 5px !important;
+  margin-bottom: 0px;
+}

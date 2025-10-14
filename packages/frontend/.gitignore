@@ -1,0 +1,7 @@
+/node_modules
+/dist/main.js
+/dist/*.js
+/dist/config.json
+
+#output
+/export/release/*

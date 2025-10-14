@@ -1,0 +1,23 @@
+{
+  "name": "@jesgo/common",
+  "version": "1.4.0",
+  "description": "JESGO共通ライブラリ - Frontend/Backend共通の型定義・ユーティリティを提供",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "dev-start": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["jesgo", "common", "shared"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^17.0.10",
+    "typescript": "^4.5.4"
+  },
+  "peerDependencies": {},
+  "dependencies": {}
+}
+

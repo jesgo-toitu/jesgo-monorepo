@@ -1,0 +1,140 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: jesgo-postgres-dev
+    environment:
+      POSTGRES_DB: jesgo_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345678
+      POSTGRES_INITDB_ARGS: '--encoding=UTF-8 --locale=ja_JP.UTF-8'
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 基本テーブル作成・データ挿入
+      - ./packages/backend/doc/DB/01_create.sql:/docker-entrypoint-initdb.d/01_create.sql
+      - ./packages/backend/doc/DB/02_insert.sql:/docker-entrypoint-initdb.d/02_insert.sql
+      # beta1
+      - ./packages/backend/doc/DB/batch/beta1/01_alter.sql:/docker-entrypoint-initdb.d/03_beta1_01_alter.sql
+      - ./packages/backend/doc/DB/batch/beta1/02_update.sql:/docker-entrypoint-initdb.d/04_beta1_02_update.sql
+      # beta2
+      - ./packages/backend/doc/DB/batch/beta2/jesgo_plugin.sql:/docker-entrypoint-initdb.d/05_beta2_jesgo_plugin.sql
+      - ./packages/backend/doc/DB/batch/beta2/jesgo_user_roll.sql:/docker-entrypoint-initdb.d/06_beta2_jesgo_user_roll.sql
+      - ./packages/backend/doc/DB/batch/beta2/jesgo_schema_patch.sql:/docker-entrypoint-initdb.d/07_beta2_jesgo_schema_patch.sql
+      # beta3
+      - ./packages/backend/doc/DB/batch/beta3/alter_jesgo_user_roll.sql:/docker-entrypoint-initdb.d/08_beta3_alter_jesgo_user_roll.sql
+      # beta4
+      - ./packages/backend/doc/DB/batch/beta4/alter_jesgo_document.sql:/docker-entrypoint-initdb.d/09_beta4_alter_jesgo_document.sql
+      - ./packages/backend/doc/DB/batch/beta4/alter_jesgo_plugin.sql:/docker-entrypoint-initdb.d/10_beta4_alter_jesgo_plugin.sql
+      - ./packages/backend/doc/DB/batch/beta4/update_jesgo_document_schema.sql:/docker-entrypoint-initdb.d/11_beta4_update_jesgo_document_schema.sql
+      - ./packages/backend/doc/DB/batch/beta4/fix_not_object_document_schema.sql:/docker-entrypoint-initdb.d/12_beta4_fix_not_object_document_schema.sql
+      # ver111
+      - ./packages/backend/doc/DB/batch/ver111/update_jesgo_document_schema.sql:/docker-entrypoint-initdb.d/13_ver111_update_jesgo_document_schema.sql
+      # ver120
+      - ./packages/backend/doc/DB/batch/ver120/alter_jesgo_plugin.sql:/docker-entrypoint-initdb.d/14_ver120_alter_jesgo_plugin.sql
+      - ./packages/backend/doc/DB/batch/ver120/create_jesgo_plugin_group.sql:/docker-entrypoint-initdb.d/15_ver120_create_jesgo_plugin_group.sql
+      - ./packages/backend/doc/DB/batch/ver120/insert_jesgo_plugin_group.sql:/docker-entrypoint-initdb.d/16_ver120_insert_jesgo_plugin_group.sql
+      - ./packages/backend/doc/DB/batch/ver120/update_jesgo_plugin.sql:/docker-entrypoint-initdb.d/17_ver120_update_jesgo_plugin.sql
+      # ver130
+      - ./packages/backend/doc/DB/batch/ver130/fix_schema_variation.sql:/docker-entrypoint-initdb.d/18_ver130_fix_schema_variation.sql
+      - ./packages/backend/doc/DB/batch/ver130/jesgo_document_schema.sql:/docker-entrypoint-initdb.d/19_ver130_jesgo_document_schema.sql
+      - ./packages/backend/doc/DB/batch/ver130/update_plugins.sql:/docker-entrypoint-initdb.d/20_ver130_update_plugins.sql
+      # ver140
+      - ./packages/backend/doc/DB/batch/ver140/fix_schema_variation.sql:/docker-entrypoint-initdb.d/21_ver140_fix_schema_variation.sql
+    networks:
+      - jesgo-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jesgo_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      target: dev
+    image: jesgo-monorepo-backend:dev
+    container_name: jesgo-backend-dev
+    environment:
+      NODE_ENV: development
+      PORT: 8000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: jesgo_db
+      DB_USER: postgres
+      DB_PASSWORD: 12345678
+      FORCE_COLOR: 1
+      NPM_CONFIG_COLOR: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./packages/settings:/app/packages/settings
+      - ./packages/common:/app/packages/common
+      - ./packages/backend:/app/packages/backend
+      - /app/packages/common/node_modules
+      - /app/packages/backend/node_modules
+      - backend_logs:/app/logs
+    networks:
+      - jesgo-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "cd /app/packages/common && npm install && npm run build && cd /app/packages/backend && npm install && npm run build && npm run dev-start"]
+    restart: unless-stopped
+
+  # Frontend Web Server
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      target: dev
+    image: jesgo-monorepo-frontend:dev
+    container_name: jesgo-frontend-dev
+    environment:
+      NODE_ENV: development
+      REACT_APP_API_URL: http://localhost:8000
+      PORT: 3000
+    ports:
+      - "3000:3030"
+    volumes:
+      - ./packages/settings:/app/packages/settings
+      - ./packages/common:/app/packages/common
+      - ./packages/frontend:/app/packages/frontend
+      - /app/packages/common/node_modules
+      - /app/packages/frontend/node_modules
+    networks:
+      - jesgo-network
+    depends_on:
+      - backend
+    command: ["sh", "-c", "cd /app/packages/common && npm install && npm run build && cd /app/packages/frontend && npm install --legacy-peer-deps && npm run build && npm run dev-start"]
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy (Optional)
+  nginx:
+    image: nginx:alpine
+    container_name: jesgo-nginx-dev
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - jesgo-network
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    profiles:
+      - proxy
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_logs:
+    driver: local
+
+networks:
+  jesgo-network:
+    driver: bridge

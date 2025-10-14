@@ -1,0 +1,21 @@
+diff --git a/node_modules/unzipper/lib/parse.js b/node_modules/unzipper/lib/parse.js
+index bd3b8cc..e756944 100644
+--- a/node_modules/unzipper/lib/parse.js
++++ b/node_modules/unzipper/lib/parse.js
+@@ -9,6 +9,7 @@ var BufferStream = require('./BufferStream');
+ var parseExtraField = require('./parseExtraField');
+ var Buffer = require('./Buffer');
+ var parseDateTime = require('./parseDateTime');
++var iconv = require('iconv-lite');
+ 
+ // Backwards compatibility for node versions < 8
+ if (!Stream.Writable || !Stream.Writable.prototype.destroy)
+@@ -105,7 +106,7 @@ Parse.prototype._readFile = function () {
+     if (self.crxHeader) vars.crxHeader = self.crxHeader;
+ 
+     return self.pull(vars.fileNameLength).then(function(fileNameBuffer) {
+-      var fileName = fileNameBuffer.toString('utf8');
++      var fileName = iconv.decode(fileNameBuffer, 'cp932');
+       var entry = Stream.PassThrough();
+       var __autodraining = false;
+ 
