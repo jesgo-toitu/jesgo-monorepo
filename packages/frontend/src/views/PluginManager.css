@@ -1,0 +1,19 @@
+.plugin-list {
+  width: 96%;
+  margin: 2rem 2%;
+  margin-top: 7rem;
+  white-space: pre-wrap;
+  overflow-y: scroll;
+  height: calc(100vh - 12rem);
+}
+
+.plugin-table thead {
+  background-color: whitesmoke;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.plugin-table-short {
+  width: 10rem;
+}

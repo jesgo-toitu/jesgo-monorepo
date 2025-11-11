@@ -1,0 +1,11 @@
+.input-ime-active {
+  ime-mode: active;
+}
+
+.input-ime-inactive {
+  ime-mode: inactive;
+}
+
+.input-ime-disable {
+  ime-mode: disabled;
+}

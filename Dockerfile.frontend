@@ -1,0 +1,92 @@
+# Frontend Dockerfile
+FROM node:20-alpine AS base
+
+# Install system dependencies including bash for Cursor compatibility
+RUN apk add --no-cache bash
+
+# Install dependencies only when needed
+FROM base AS deps
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY packages/frontend/package*.json ./packages/frontend/
+
+# Install dependencies
+RUN npm install --only=production && npm cache clean --force
+
+# Development stage
+FROM base AS dev
+WORKDIR /app
+
+# Copy settings directory first
+COPY packages/settings ./packages/settings
+
+# Copy common package files
+COPY packages/common/package*.json ./packages/common/
+COPY packages/common/tsconfig.json ./packages/common/
+
+# Install common dependencies and build common package
+WORKDIR /app/packages/common
+RUN npm install
+COPY packages/common/src ./src
+RUN npm run build
+
+# Copy frontend package files
+WORKDIR /app
+COPY packages/frontend/package*.json ./packages/frontend/
+
+# Install dependencies in frontend directory
+WORKDIR /app/packages/frontend
+RUN npm install --legacy-peer-deps
+
+# Copy source code
+COPY packages/frontend ./
+
+# Expose port
+EXPOSE 3030
+
+# Start development server
+CMD ["npm", "run", "dev-start"]
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+
+# Copy settings directory first
+COPY packages/settings ./packages/settings
+
+# Copy and build common package
+COPY packages/common/package*.json ./packages/common/
+COPY packages/common/tsconfig.json ./packages/common/
+
+WORKDIR /app/packages/common
+RUN npm install
+COPY packages/common/src ./src
+RUN npm run build
+
+# Copy frontend package files
+WORKDIR /app
+COPY packages/frontend/package*.json ./packages/frontend/
+
+# Install dependencies and build in frontend directory
+WORKDIR /app/packages/frontend
+RUN npm install --legacy-peer-deps
+COPY packages/frontend ./
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine AS production
+
+# Copy built files to nginx
+COPY --from=builder /app/packages/frontend/dist /usr/share/nginx/html
+
+# Copy config.json to nginx html root
+COPY --from=builder /app/packages/settings/config.json /usr/share/nginx/html/config.json
+
+# Copy nginx configuration
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,123 @@
+# Backend Dockerfile
+FROM node:20-alpine AS base
+
+# Install system dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    postgresql-client \
+    openssh \
+    bash
+
+# Install dependencies only when needed
+FROM base AS deps
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY packages/backend/package*.json ./packages/backend/
+
+# Install dependencies
+RUN npm install --only=production && npm cache clean --force
+
+# Development stage
+FROM base AS dev
+WORKDIR /app
+
+# Copy settings directory first
+COPY packages/settings ./packages/settings
+
+# Copy common package files
+COPY packages/common/package*.json ./packages/common/
+COPY packages/common/tsconfig.json ./packages/common/
+
+# Install common dependencies and build common package
+WORKDIR /app/packages/common
+RUN npm install
+COPY packages/common/src ./src
+RUN npm run build
+
+# Copy backend package files
+WORKDIR /app
+COPY packages/backend/package*.json ./packages/backend/
+
+# Install backend dependencies directly in the package directory
+WORKDIR /app/packages/backend
+RUN npm install
+
+# Copy source code
+COPY packages/backend ./
+# Ensure keys directory exists
+RUN mkdir -p ./backendapp/config/keys
+    
+# Note: TypeScript build will be done at runtime for development
+
+# Return to app root
+WORKDIR /app
+
+# Expose port
+EXPOSE 5000
+
+# Start development server
+WORKDIR /app/packages/backend
+CMD ["npm", "run", "dev-start"]
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+
+# Copy settings directory first
+COPY packages/settings ./packages/settings
+
+# Copy and build common package
+COPY packages/common/package*.json ./packages/common/
+COPY packages/common/tsconfig.json ./packages/common/
+
+WORKDIR /app/packages/common
+RUN npm install
+COPY packages/common/src ./src
+RUN npm run build
+
+# Copy backend package files
+WORKDIR /app
+COPY packages/backend/package*.json ./packages/backend/
+
+# Install dependencies and build in backend directory
+WORKDIR /app/packages/backend
+RUN npm install
+COPY packages/backend ./
+# Ensure keys directory exists
+RUN mkdir -p ./backendapp/config/keys
+RUN npm run build
+
+# Production stage
+FROM base AS production
+WORKDIR /app
+
+# Copy settings directory
+COPY --from=builder /app/packages/settings ./packages/settings
+
+# Copy built common package
+COPY --from=builder /app/packages/common ./packages/common
+
+# Copy backend package files and install production dependencies
+COPY packages/backend/package*.json ./packages/backend/
+
+WORKDIR /app/packages/backend
+RUN npm ci --only=production
+
+# Copy built application
+COPY --from=builder /app/packages/backend/dist ./dist
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nodejs -u 1001
+
+# Change ownership
+RUN chown -R nodejs:nodejs /app
+USER nodejs
+
+EXPOSE 5000
+
+CMD ["node", "dist/app.js"]

@@ -4,9 +4,9 @@ JESGOは医療情報を管理するWebアプリケーションです。このリ
 
 ## バージョン
 
-**v1.4.0** - 共通パッケージ化・設定の一元管理対応
+**v1.5.0** - 共通パッケージ化・設定の一元管理対応
 
-### v1.4.0 の主な変更点
+### v1.5.0 の主な変更点
 
 - ✅ **共通パッケージ (`@jesgo/common`)** の導入
   - Frontend/Backend共通の型定義とユーティリティを統合
@@ -40,7 +40,7 @@ JESGOは医療情報を管理するWebアプリケーションです。このリ
 ```
 jesgo-monorepo/
 ├── packages/
-│   ├── common/               # 共通パッケージ（v1.4.0～）
+│   ├── common/               # 共通パッケージ（v1.5.0～）
 │   │   ├── src/
 │   │   │   ├── types/       # API、設定の型定義
 │   │   │   ├── constants/   # JESGO定数
@@ -48,7 +48,7 @@ jesgo-monorepo/
 │   │   │   └── validation/  # バリデーション定義
 │   │   └── dist/            # ビルド出力
 │   │
-│   ├── settings/             # 設定ファイル（v1.4.0～）
+│   ├── settings/             # 設定ファイル（v1.5.0～）
 │   │   ├── config.json      # 実際の設定（Git除外）
 │   │   └── README.md
 │   │
@@ -130,7 +130,7 @@ cp env.template .env
 
 ### 設定ファイルの場所
 
-v1.4.0から、設定ファイルは`packages/settings/`ディレクトリで一元管理されます。
+v1.5.0から、設定ファイルは`packages/settings/`ディレクトリで一元管理されます。
 
 **設定ファイルのパス優先順位:**
 
@@ -194,7 +194,7 @@ environment:
 
 ### ポート設定の統一
 
-v1.4.0からDocker開発環境とnpm run dev環境でポート番号を統一しています：
+v1.5.0からDocker開発環境とnpm run dev環境でポート番号を統一しています：
 
 | サービス | ポート番号 | アクセスURL |
 |---------|----------|------------|
@@ -784,15 +784,15 @@ npm run lint             # リント実行
 
 ```bash
 # タグ作成
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.5.0
+git push origin v1.5.0
 
 # タグ一覧
 git tag -l
 
 # タグ削除
-git tag -d v1.4.0
-git push origin :refs/tags/v1.4.0
+git tag -d v1.5.0
+git push origin :refs/tags/v1.5.0
 ```
 
 ## コントリビューション
@@ -829,14 +829,10 @@ git push origin :refs/tags/v1.4.0
 - [PostgreSQL ドキュメント](https://www.postgresql.org/docs/)
 - [Docker ドキュメント](https://docs.docker.com/)
 
-## ライセンス
-
-ISC License
-
 ## サポート
 
 技術的な問題やバグ報告は、GitHubのIssueまたは開発チームにお問い合わせください。
 
 ---
 
-**JESGO Project** - 医療情報システム v1.4.0
+**JESGO Project** - 医療情報システム v1.5.0

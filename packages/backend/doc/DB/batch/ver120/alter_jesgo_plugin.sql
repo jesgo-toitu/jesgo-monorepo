@@ -1,0 +1,1 @@
+ALTER TABLE jesgo_plugin ADD COLUMN IF NOT EXISTS plugin_group_id integer;

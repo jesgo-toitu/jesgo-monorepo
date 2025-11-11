@@ -1,0 +1,35 @@
+/* 年月日ラジオ */
+.searchdate-radio {
+  margin-top: 10px !important;
+  margin-right: 5px;
+}
+
+/* グループ化 */
+.searchdate-group {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    margin-bottom: 0px !important;
+    margin-left: 10px;
+}
+
+/* 年の横幅 */
+.searchdate-year {
+    width: 70px;
+}
+
+/* 月、日の横幅 */
+.searchdate-month, .searchdate-day {
+    width: 50px;
+}
+
+/* 範囲指定 */
+.searchdate-rangecheck {
+    margin-right: 5px;
+}
+
+/* テキストボックス間の年月日文字列 */
+.searchdate-between-text {
+    margin-left: 2px;
+    margin-right: 2px;
+}

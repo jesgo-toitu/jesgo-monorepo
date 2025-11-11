@@ -1,0 +1,45 @@
+diff --git a/node_modules/@types/json-schema/index.d.ts b/node_modules/@types/json-schema/index.d.ts
+index 7a92dec..24dc225 100644
+--- a/node_modules/@types/json-schema/index.d.ts
++++ b/node_modules/@types/json-schema/index.d.ts
+@@ -721,6 +721,40 @@ export interface JSONSchema7 {
+     readOnly?: boolean | undefined;
+     writeOnly?: boolean | undefined;
+     examples?: JSONSchema7Type | undefined;
++
++    /**
++     * JSONSchema 未対応プロパティ
++     */
++    units?: string | undefined;
++    calculationType?: string | undefined;
++    calculationTag?: string | undefined;
++
++    /**
++     * 拡張ボキャブラリー
++     */ 
++    'jesgo:required'?: string[] | undefined;
++    'jesgo:set'?: string | undefined;
++    'jesgo:get'?: string | undefined;
++    'jesgo:parentschema'?: string[] | undefined;
++    'jesgo:unique'?: boolean | undefined;
++    'jesgo:subschema'?: string[] | undefined;
++    'jesgo:childschema'?: string[] | undefined;
++    'jesgo:ref'?: string | undefined;
++    'jesgo:ui:visibleWhen'?: JSONSchema7Definition | undefined;
++    'jesgo:ui:subschemastyle'?:string | undefined;
++    'jesgo:ui:textarea'?: number | boolean | undefined;
++    'jesgo:ui:listtype'?: string | undefined;
++    'jesgo:ui:hidden'?:boolean | undefined;
++    'jesgo:version'?:string | undefined;
++    'jesgo:validationalert'?: string | undefined;
++    'jesgo:copy'?: boolean | undefined;
++    'jesgo:inheriteventdate'?: string | undefined;
++
++    /**
++     * 内部処理用拡張ボキャブラリー
++     */
++    'jesgo:validation:haserror'?:boolean | undefined;
++    'jesgo:notExistProperty'?: boolean | undefined;
+ }
+ 
+ export interface ValidationResult {

@@ -1,0 +1,26 @@
+{
+  "include": ["src/**/*", "config.ts"],
+  "compilerOptions": {
+      "target": "es2020",
+      "module": "es2020",
+      "jsx": "react",
+    //   "sourceMap": false,
+    //   "removeComments": true,
+      "strict": true,
+      "esModuleInterop": true,
+      "allowJs": true,
+      "moduleResolution": "node",
+    //   "noImplicitAny": false,
+      // TODO スキーマの仮宣言のため使用。リリース時要削除。
+      "resolveJsonModule": true,
+      "paths": {
+        "*": [
+          "./node_modules/@types/*",
+          "./node_modules/*"
+        ]
+      }
+    },
+    "include": [
+      "src"
+    ]
+  }

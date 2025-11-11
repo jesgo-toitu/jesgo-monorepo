@@ -1,0 +1,10 @@
+.setting-list {
+  width: 96%;
+  margin: 5rem 2%;
+  margin-top: 9rem;
+}
+
+.setting-table tbody {
+  overflow-y: auto;
+  height: calc(100vh - 25.2rem);
+}

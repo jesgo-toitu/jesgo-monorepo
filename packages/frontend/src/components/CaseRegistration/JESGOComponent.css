@@ -1,0 +1,136 @@
+.label-type {
+  margin-right: 5px;
+}
+
+.array-item-border {
+  border-bottom: 2px dotted #a0a0a0;
+  padding-top: 5px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+/* arrayの追加ボタン */
+.btn-add {
+  min-width: 40px;
+  margin-top: 5px;
+}
+
+/* arrayの大項目タイトル */
+.field-array > legend {
+  margin-bottom: 0px;
+}
+
+/* 横並び type=object */
+.subschemastyle-column > fieldset {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+/* flexを無効化する */
+.subschemastyle-column > fieldset > .field-array {
+  width: 100%;
+}
+
+/* arrayの中のobjectは階層が違うので別途定義 */
+.array-subschemastyle-column .field-object > fieldset {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.with-units-div, .with-delete-div {
+  display: flex;
+  align-items: center;
+}
+
+/* descriptionのラベル */
+.description-tooptip {
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+/* 階層ドロップダウンのグループ */
+.layer-dropdown-group-title {
+  font-weight: bold;
+}
+
+/** subschemastyle:inline start*/
+/* type=object */
+.subschemastyle-inline > fieldset {
+  display: flex;
+  flex-wrap: wrap;
+}
+.subschemastyle-inline > fieldset > .form-group {
+  margin-right: 10px;
+  margin-bottom: 5px;
+}
+
+/* arrayの中のobjectは階層が違うので別途定義 */
+.array-subschemastyle-inline .field-object > fieldset {
+  display: flex;
+  flex-wrap: wrap;
+}
+.array-subschemastyle-inline .field-object > fieldset > .form-group {
+  margin-right: 10px;
+  margin-bottom: 5px;
+}
+
+/* flexを有効化する */
+.subschemastyle-inline > fieldset > .field-array,
+.subschemastyle-inline > fieldset > .field-object {
+  width: auto;
+}
+/** subschemastyle:inline end*/
+
+/* 階層表示用コンボボックス向けCSS start */
+
+/* mui固有のラベル非表示 */
+.css-hdw1oc {
+  display: none;
+}
+
+.layer-combobox-group-title {
+  padding-left: 12px;
+  padding-top: 5px;
+  font-family: 'BIZ-UDPGothic';
+  font-weight: bold;
+}
+
+li.layer-combobox-item {
+  padding: 0px 0px 2px 12px !important;
+  height: 20px;
+}
+
+li.layer-combobox-item div {
+  font-family: 'BIZ-UDPGothic' !important;
+}
+/* 階層表示用コンボボックス向けCSS end */
+
+/* jesgo:require ハイライト start */
+/* JSOG */
+.jesgo-require-jsog select,
+.jesgo-require-jsog textarea,
+.jesgo-require-jsog .checkboxes,
+.jesgo-require-jsog .field-radio-group,
+.jesgo-require-jsog .MuiInputBase-root,
+.jesgo-require-jsog input, 
+/* JSGOE */
+.jesgo-require-jsgoe select,
+.jesgo-require-jsgoe textarea,
+.jesgo-require-jsgoe .checkboxes,
+.jesgo-require-jsgoe .field-radio-group,
+.jesgo-require-jsgoe .MuiInputBase-root,
+.jesgo-require-jsgoe input, 
+/* その他 */
+.jesgo-require-others select,
+.jesgo-require-others textarea,
+.jesgo-require-others .checkboxes,
+.jesgo-require-others .field-radio-group,
+.jesgo-require-others .MuiInputBase-root,
+.jesgo-require-others input 
+{
+  background: 
+  linear-gradient(90deg, transparent 95%, pink), 
+  linear-gradient(270deg, transparent 95%, pink), 
+  linear-gradient(0deg, transparent 65%, pink), 
+  linear-gradient(180deg, transparent 65%, pink)
+}
