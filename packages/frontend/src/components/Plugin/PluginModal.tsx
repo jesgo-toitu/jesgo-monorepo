@@ -13,15 +13,17 @@ import {
 } from 'react-bootstrap';
 import ModalDialog from '../common/ModalDialog';
 import './PluginModal.css';
-import { executePlugin, jesgoPluginColumns } from '../../common/Plugin';
+import {
+  executePlugin,
+  executePluginWithTimeout,
+  jesgoPluginColumns,
+} from '../../common/Plugin';
 import { jesgoCaseDefine } from '../../store/formDataReducer';
 import { reloadState } from '../../views/Registration';
 import {
   IsNotUpdate,
   OpenOutputView,
 } from '../../common/CaseRegistrationUtility';
-import { fTimeout } from '../../common/CommonUtility';
-import { Const } from '../../common/Const';
 import PluginOverwriteConfirm, {
   OverwriteDialogPlop,
 } from '../common/PluginOverwriteConfirm';
@@ -125,32 +127,19 @@ export const PluginModalDialog = (props: {
       // eslint-disable-next-line no-restricted-globals
       confirm('編集中のデータがありますが、破棄してプラグインを実行しますか？')
     ) {
-      setIsLoading(true);
-      await Promise.race([
-        fTimeout(Const.PLUGIN_TIMEOUT_SEC),
-        executePlugin(
-          targetPlugin as jesgoPluginColumns,
-          getTargetFunction(),
-          undefined,
-          setReload,
-          setIsLoading,
-          setOverwriteDialogPlop
-        ),
-      ])
-        .then((res) => {
-          if (!targetPlugin?.update_db) {
-            // eslint-disable-next-line
-            OpenOutputView(window, res);
-          }
-        })
-        .catch((err) => {
-          if (err === 'timeout') {
-            alert('操作がタイムアウトしました');
-          }
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
+      await executePluginWithTimeout(
+        targetPlugin as jesgoPluginColumns,
+        () =>
+          executePlugin(
+            targetPlugin as jesgoPluginColumns,
+            getTargetFunction(),
+            undefined,
+            setReload,
+            setIsLoading,
+            setOverwriteDialogPlop
+          ),
+        setIsLoading
+      );
     }
 
     onOk();

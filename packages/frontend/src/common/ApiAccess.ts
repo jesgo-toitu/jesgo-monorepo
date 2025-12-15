@@ -104,54 +104,50 @@ const apiAccess = async (
 
   let errMsg: unknown;
 
+  // URL構築のヘルパー関数
+  const buildUrl = (baseUrl: string, endpoint: string): string => {
+    const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    return `${cleanBaseUrl}${cleanEndpoint}`;
+  };
+
+  /**
+   * Axiosリクエストを実行する共通関数
+   * @param requestFn Axiosリクエスト関数
+   */
+  const executeRequest = async (
+    requestFn: () => Promise<{ data: ApiReturnObject }>
+  ): Promise<void> => {
+    try {
+      const response = await requestFn();
+      returnObj = response.data as ApiReturnObject;
+    } catch (err) {
+      errMsg = err;
+    }
+  };
+
+  // リクエストタイプに応じて適切なリクエストを実行
+  const requestUrl = buildUrl(config.endPointUrl, url);
   switch (methodType) {
     case METHOD_TYPE.GET:
-      await axios
-        .get(`${config.endPointUrl}${url}`, payloadObj)
-        .then((response) => {
-          returnObj = response.data as ApiReturnObject;
-        })
-        .catch((err) => {
-          errMsg = err;
-        });
+      await executeRequest(() => axios.get(requestUrl, payloadObj));
       break;
 
     case METHOD_TYPE.POST:
       // POSTの場合は第2引数がリクエストボディ、第3引数が設定オブジェクト
-      await axios
-        .post(
-          `${config.endPointUrl}${url}`, 
-          body,  // リクエストボディ
-          { headers: payloadObj?.headers }  // 設定オブジェクト
-        )
-        .then((response) => {
-          returnObj = response.data as ApiReturnObject;
-        })
-        .catch((err) => {
-          errMsg = err;
-        });
+      await executeRequest(() =>
+        axios.post(requestUrl, body, { headers: payloadObj?.headers })
+      );
       break;
 
     case METHOD_TYPE.DELETE:
-      await axios
-        .delete(`${config.endPointUrl}${url}`, payloadObj)
-        .then((response) => {
-          returnObj = response.data as ApiReturnObject;
-        })
-        .catch((err) => {
-          errMsg = err;
-        });
+      await executeRequest(() => axios.delete(requestUrl, payloadObj));
       break;
 
     case METHOD_TYPE.POST_ZIP:
-      await axios
-        .post(`${config.endPointUrl}${url}`, payloadObj.data, payloadObj)
-        .then((response) => {
-          returnObj = response.data as ApiReturnObject;
-        })
-        .catch((err) => {
-          errMsg = err;
-        });
+      await executeRequest(() =>
+        axios.post(requestUrl, payloadObj.data, payloadObj)
+      );
       break;
 
     default:

@@ -6,9 +6,11 @@ import {
   IsNotUpdate,
   OpenOutputView,
 } from '../../common/CaseRegistrationUtility';
-import { fTimeout } from '../../common/CommonUtility';
-import { Const } from '../../common/Const';
-import { executePlugin, jesgoPluginColumns } from '../../common/Plugin';
+import {
+  executePlugin,
+  executePluginWithTimeout,
+  jesgoPluginColumns,
+} from '../../common/Plugin';
 import { jesgoCaseDefine } from '../../store/formDataReducer';
 import PluginOverwriteConfirm, {
   OverwriteDialogPlop,
@@ -83,32 +85,19 @@ const PluginButton = (props: {
       // eslint-disable-next-line no-restricted-globals
       confirm('編集中のデータがありますが、破棄してプラグインを実行しますか？')
     ) {
-      setIsLoading(true);
-      await Promise.race([
-        fTimeout(Const.PLUGIN_TIMEOUT_SEC),
-        executePlugin(
-          plugin,
-          getTargetFunction(),
-          undefined,
-          setReload,
-          setIsLoading,
-          setOverwriteDialogPlop
-        ),
-      ])
-        .then((res) => {
-          if (!plugin.update_db) {
-            // eslint-disable-next-line
-            OpenOutputView(window, res);
-          }
-        })
-        .catch((err) => {
-          if (err === 'timeout') {
-            alert('操作がタイムアウトしました');
-          }
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
+      await executePluginWithTimeout(
+        plugin,
+        () =>
+          executePlugin(
+            plugin,
+            getTargetFunction(),
+            undefined,
+            setReload,
+            setIsLoading,
+            setOverwriteDialogPlop
+          ),
+        setIsLoading
+      );
     }
   };
 

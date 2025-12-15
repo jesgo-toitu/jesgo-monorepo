@@ -32,6 +32,8 @@ export interface WebAppConfig {
   webAppPort: number;
   /** APIエンドポイントURL */
   endPointUrl: string;
+  /** 患者リストの初期表示件数 */
+  defaultPageSize?: number;
 }
 
 /**

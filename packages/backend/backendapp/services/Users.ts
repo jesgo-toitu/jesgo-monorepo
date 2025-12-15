@@ -64,6 +64,42 @@ export const passwordCheck = (value: string): boolean => {
   return true;
 };
 
+/**
+ * パスワードをハッシュ化する共通関数
+ * @param password 平文のパスワード
+ * @returns ハッシュ化されたパスワード
+ */
+export const hashPassword = async (password: string): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    hash(password + envVariables.passwordSalt, 10, (err, hash) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(hash);
+      }
+    });
+  });
+};
+
+/**
+ * JWTトークンとリフレッシュトークンを生成する共通関数
+ * @param user ユーザー情報
+ * @returns トークンとリフレッシュトークンを含むオブジェクト
+ */
+export const generateTokens = (user: dispUser): {
+  token: string;
+  reflesh_token: string;
+} => {
+  return {
+    token: sign(user, envVariables.privateKey, {
+      expiresIn: '1h',
+    }),
+    reflesh_token: sign(user, `${envVariables.privateKey}reflesh`, {
+      expiresIn: '3h',
+    }),
+  };
+};
+
 //インターフェース
 export interface Jwt {
   token: string;
@@ -250,15 +286,7 @@ export const signUpUser = async (
 
   if (result == RESULT.NORMAL_TERMINATION) {
     try {
-      const hashedPassword = await new Promise<string>((resolve, reject) => {
-        hash(password + envVariables.passwordSalt, 10, (err, hash) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(hash);
-          }
-        });
-      });
+      const hashedPassword = await hashPassword(password);
 
       let ret;
       if (updateId > -1) {
@@ -338,28 +366,28 @@ export const changePassword = async (
 
   let result = RESULT.NORMAL_TERMINATION;
 
-  const dbAccess = new DbAccess();
-  await dbAccess.connectWithConf();
+  try {
+    const hashedPassword = await hashPassword(password);
+    const dbAccess = new DbAccess();
+    await dbAccess.connectWithConf();
 
-  hash(password + envVariables.passwordSalt, 10, async function (err, hash) {
     //update文を発行
     const ret = await dbAccess.query(
       'UPDATE jesgo_user SET password_hash = $1 WHERE user_id = $2',
-      [hash, user_id]
+      [hashedPassword, user_id]
     );
     await dbAccess.end();
     if (ret != null) {
       logging(LOGTYPE.INFO, 'success', 'Users', 'changePassword');
     } else {
-      if (err) {
-        logging(LOGTYPE.ERROR, err.message, 'Users', 'changePassword');
-      } else {
-        logging(LOGTYPE.ERROR, '不明なエラー', 'Users', 'changePassword');
-      }
-
+      logging(LOGTYPE.ERROR, '不明なエラー', 'Users', 'changePassword');
       result = RESULT.FAILED_USER_ERROR;
     }
-  });
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラー';
+    logging(LOGTYPE.ERROR, errorMessage, 'Users', 'changePassword');
+    result = RESULT.FAILED_USER_ERROR;
+  }
   return { statusNum: result, body: null };
 };
 
@@ -395,15 +423,7 @@ export const editUserProfile = async (
 
   if (passwordChange) {
     try {
-      const hashedPassword = await new Promise<string>((resolve, reject) => {
-        hash(password + envVariables.passwordSalt, 10, (err, hash) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(hash);
-          }
-        });
-      });
+      const hashedPassword = await hashPassword(password);
 
       //update文を発行
       const ret = await dbAccess.query(
@@ -473,13 +493,13 @@ export const editMyProfile = async (
   const dbAccess = new DbAccess();
   await dbAccess.connectWithConf();
 
-  hash(password + envVariables.passwordSalt, 10, async function (err, hash) {
-    //update文を発行
+  try {
     let ret;
     if (passwordChange) {
+      const hashedPassword = await hashPassword(password);
       ret = await dbAccess.query(
         'UPDATE jesgo_user SET name = $1, display_name = $2, password_hash = $3 WHERE user_id = $4',
-        [name, display_name, hash, user_id]
+        [name, display_name, hashedPassword, user_id]
       );
     } else {
       ret = await dbAccess.query(
@@ -492,15 +512,15 @@ export const editMyProfile = async (
       logging(LOGTYPE.INFO, 'success', 'Users', 'editMyProfile');
       return true;
     } else {
-      if (err) {
-        logging(LOGTYPE.ERROR, err.message, 'Users', 'editMyProfile');
-      } else {
-        logging(LOGTYPE.ERROR, '不明なエラー', 'Users', 'editMyProfile');
-      }
+      logging(LOGTYPE.ERROR, '不明なエラー', 'Users', 'editMyProfile');
       return false;
     }
-  });
-  return false;
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラー';
+    logging(LOGTYPE.ERROR, errorMessage, 'Users', 'editMyProfile');
+    await dbAccess.end();
+    return false;
+  }
 };
 
 /**
@@ -708,16 +728,9 @@ export const loginUser = async (
       is_data_manage_roll: roll[0].data_manage,
       is_system_manage_roll: roll[0].system_manage,
     };
-    returnObj.token = sign(ret[0], envVariables.privateKey, {
-      expiresIn: '1h',
-    });
-    returnObj.reflesh_token = sign(
-      ret[0],
-      `${envVariables.privateKey}reflesh`,
-      {
-        expiresIn: '3h',
-      }
-    );
+    const tokens = generateTokens(ret[0]);
+    returnObj.token = tokens.token;
+    returnObj.reflesh_token = tokens.reflesh_token;
     return { statusNum: RESULT.NORMAL_TERMINATION, body: returnObj };
   } else {
     logging(LOGTYPE.ERROR, '不明なエラー', 'Users', 'loginUser');
@@ -758,16 +771,7 @@ export const refleshLogin = (oldToken: string | undefined): ApiReturnObject => {
       password_hash: oldUser.password_hash,
       deleted: oldUser.deleted,
     };
-    const token: { token: string; reflesh_token: string } = {
-      token: '',
-      reflesh_token: '',
-    };
-    token.token = sign(newUser, envVariables.privateKey, {
-      expiresIn: '1h',
-    });
-    token.reflesh_token = sign(newUser, `${envVariables.privateKey}reflesh`, {
-      expiresIn: '3h',
-    });
+    const token = generateTokens(newUser);
     return { statusNum: RESULT.NORMAL_TERMINATION, body: token };
   } catch (err) {
     logging(LOGTYPE.ERROR, (err as Error).message, 'Users', 'refleshLogin');

@@ -829,6 +829,10 @@ git push origin :refs/tags/v1.5.0
 - [PostgreSQL ドキュメント](https://www.postgresql.org/docs/)
 - [Docker ドキュメント](https://docs.docker.com/)
 
+## ライセンス
+
+ISC License
+
 ## サポート
 
 技術的な問題やバグ報告は、GitHubのIssueまたは開発チームにお問い合わせください。

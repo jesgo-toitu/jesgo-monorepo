@@ -42,6 +42,11 @@ services:
       - ./packages/backend/doc/DB/batch/ver130/update_plugins.sql:/docker-entrypoint-initdb.d/20_ver130_update_plugins.sql
       # ver140
       - ./packages/backend/doc/DB/batch/ver140/fix_schema_variation.sql:/docker-entrypoint-initdb.d/21_ver140_fix_schema_variation.sql
+      # ver150
+      - ./packages/backend/doc/DB/batch/ver150/01_create_preset_tables.sql:/docker-entrypoint-initdb.d/22_ver150_01_create_preset_tables.sql
+      - ./packages/backend/doc/DB/batch/ver150/02_create_fixed_field_tables.sql:/docker-entrypoint-initdb.d/23_ver150_02_create_fixed_field_tables.sql
+      - ./packages/backend/doc/DB/batch/ver150/03_insert_sample_data.sql:/docker-entrypoint-initdb.d/24_ver150_03_insert_sample_data.sql
+      - ./packages/backend/doc/DB/batch/ver150/04_fix_constraints.sql:/docker-entrypoint-initdb.d/25_ver150_04_fix_constraints.sql
     networks:
       - jesgo-network
     healthcheck:
@@ -68,6 +73,8 @@ services:
       DB_PASSWORD: 12345678
       FORCE_COLOR: 1
       NPM_CONFIG_COLOR: always
+      CHOKIDAR_USEPOLLING: true
+      WATCHPACK_POLLING: true
     ports:
       - "8000:8000"
     volumes:
@@ -82,7 +89,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-c", "cd /app/packages/common && npm install && npm run build && cd /app/packages/backend && npm install && npm run build && npm run dev-start"]
+    command: ["sh", "-c", "cd /app/packages/common && npm install && npm run build && cd /app/packages/backend && npm install && npm run dev-watch"]
     restart: unless-stopped
 
   # Frontend Web Server
@@ -96,7 +103,11 @@ services:
     environment:
       NODE_ENV: development
       REACT_APP_API_URL: http://localhost:8000
-      PORT: 3000
+      PORT: 3030
+      WATCHPACK_POLLING: true
+      CHOKIDAR_USEPOLLING: true
+      WEBPACK_HOST: localhost
+      WEBPACK_PORT: 3000
     ports:
       - "3000:3030"
     volumes:
@@ -109,7 +120,7 @@ services:
       - jesgo-network
     depends_on:
       - backend
-    command: ["sh", "-c", "cd /app/packages/common && npm install && npm run build && cd /app/packages/frontend && npm install --legacy-peer-deps && npm run build && npm run dev-start"]
+    command: ["sh", "-c", "cd /app/packages/common && npm install && npm run build && cd /app/packages/frontend && npm install --legacy-peer-deps && npm run dev-start"]
     restart: unless-stopped
 
   # Nginx Reverse Proxy (Optional)

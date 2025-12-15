@@ -61,7 +61,10 @@ import SaveConfirmDialog from '../components/CaseRegistration/SaveConfirmDialog'
 import {
   GetRootSchema,
   GetSchemaInfo,
+  CustomSchemaWithoutAppend,
+  getPropItemsAndNames,
 } from '../components/CaseRegistration/SchemaUtility';
+import { JSONSchema7 } from 'webpack/node_modules/schema-utils/declarations/ValidationError';
 import {
   ShowSaveDialogState,
   RegistrationErrors,
@@ -315,7 +318,6 @@ const Registration = () => {
       setDecline(loadData.jesgo_case.decline);
 
       setIsSaved(true);
-
       // 読み込んだデータをstoreに反映
       dispatch({ type: 'SAVE_LOADDATA', saveData: loadData });
 

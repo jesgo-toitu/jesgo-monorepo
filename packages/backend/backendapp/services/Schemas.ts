@@ -878,3 +878,96 @@ export const getCaseAndDocument = async (
     return { statusNum: RESULT.ABNORMAL_TERMINATION, body: null };
   }
 };
+
+/**
+ * 複数の患者のドキュメントを一括取得
+ * @param caseIds 患者IDの配列
+ * @returns 各患者の症例データとドキュメントデータ
+ */
+export const getCasesAndDocuments = async (
+  caseIds: number[]
+): Promise<ApiReturnObject> => {
+  logging(LOGTYPE.DEBUG, `呼び出し`, 'Schemas', 'getCasesAndDocuments');
+  try {
+    if (!caseIds || caseIds.length === 0) {
+      return { statusNum: RESULT.NORMAL_TERMINATION, body: [] };
+    }
+
+    const dbAccess = new DbAccess();
+    await dbAccess.connectWithConf();
+
+    // 複数の症例データを一括取得
+    const retCases = (await dbAccess.query(
+      'SELECT * FROM jesgo_case WHERE case_id = any($1) AND deleted = false',
+      [caseIds]
+    )) as jesgoCaseDefine[];
+
+    // 症例IDのマップを作成（存在する症例のみ）
+    const caseMap = new Map<number, jesgoCaseDefine>();
+    for (const caseData of retCases) {
+      caseMap.set(Number(caseData.case_id), caseData);
+    }
+
+    // 複数の患者のドキュメントを一括取得
+    const retDocs = (await dbAccess.query(
+      'SELECT * FROM jesgo_document WHERE case_id = any($1) AND deleted = false ORDER BY case_id, document_id',
+      [caseIds]
+    )) as jesgoDocumentFromDb[];
+
+    // 症例IDごとにドキュメントをグループ化
+    const documentsByCase = new Map<number, jesgoDocumentObjDefine[]>();
+    for (const doc of retDocs) {
+      if (!documentsByCase.has(doc.case_id)) {
+        documentsByCase.set(doc.case_id, []);
+      }
+      const newDoc: jesgoDocumentObjDefine = {
+        key: doc.document_id.toString(),
+        value: {
+          case_id: doc.case_id.toString(),
+          event_date: doc.event_date,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          document: doc.document,
+          child_documents: doc.child_documents,
+          schema_id: doc.schema_id,
+          schema_primary_id: doc.schema_primary_id,
+          inherit_schema: doc.inherit_schema,
+          schema_major_version: doc.schema_major_version,
+          registrant: doc.registrant,
+          created: doc.created,
+          last_updated: doc.last_updated,
+          readonly: doc.readonly,
+          deleted: doc.deleted,
+        },
+        root_order: doc.root_order,
+        event_date_prop_name: '19700101',
+        death_data_prop_name: '19700101',
+        delete_document_keys: [],
+      };
+      documentsByCase.get(doc.case_id)?.push(newDoc);
+    }
+
+    // リクエストされた順序で結果を構築
+    const result: SaveDataObjDefine[] = [];
+    for (const caseId of caseIds) {
+      const caseData = caseMap.get(caseId);
+      if (caseData) {
+        const returnObj: SaveDataObjDefine = {
+          jesgo_case: caseData,
+          jesgo_document: documentsByCase.get(caseId) || [],
+        };
+        result.push(returnObj);
+      }
+    }
+
+    await dbAccess.end();
+    return { statusNum: RESULT.NORMAL_TERMINATION, body: result };
+  } catch (e) {
+    logging(
+      LOGTYPE.ERROR,
+      `エラー発生 ${(e as Error).message}`,
+      'Schemas',
+      'getCasesAndDocuments'
+    );
+    return { statusNum: RESULT.ABNORMAL_TERMINATION, body: null };
+  }
+};

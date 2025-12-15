@@ -22,8 +22,10 @@ import {
   getPointerTrimmed,
   isPointerWithArray,
   toUTF8,
+  fTimeout,
 } from './CommonUtility';
 import { GetPackagedDocument } from './DBUtility';
+import { Const } from './Const';
 
 window.Buffer = Buffer;
 
@@ -906,6 +908,51 @@ const newDocumentImport = async (
 };
 
 /**
+ * プラグイン実行をタイムアウト付きで実行する共通関数
+ * @param plugin プラグイン情報
+ * @param executeFn 実行する関数
+ * @param setIsLoading ローディング状態を設定する関数
+ * @returns 実行結果
+ */
+export const executePluginWithTimeout = async (
+  plugin: jesgoPluginColumns,
+  executeFn: () => Promise<unknown>,
+  setIsLoading?: React.Dispatch<React.SetStateAction<boolean>>
+): Promise<unknown> => {
+  if (setIsLoading) {
+    setIsLoading(true);
+  }
+  try {
+    const res = await Promise.race([
+      fTimeout(Const.PLUGIN_TIMEOUT_SEC),
+      executeFn(),
+    ]);
+    if (!plugin.update_db) {
+      // デバッグ: プラグイン実行結果をログ出力
+      console.log('[executePluginWithTimeout] プラグイン実行結果:', {
+        type: typeof res,
+        isArray: Array.isArray(res),
+        value: res,
+        stringified: typeof res === 'string' ? res : JSON.stringify(res),
+      });
+      // eslint-disable-next-line
+      OpenOutputView(window, res);
+    }
+    return res;
+  } catch (err) {
+    if (err === 'timeout') {
+      // eslint-disable-next-line no-alert
+      alert('操作がタイムアウトしました');
+    }
+    throw err;
+  } finally {
+    if (setIsLoading) {
+      setIsLoading(false);
+    }
+  }
+};
+
+/**
  * プラグイン実行
  * @param plugin
  * @param patientList
@@ -933,7 +980,49 @@ export const executePlugin = async (
   setOverwriteDialogPlopGlobal = setOverwriteDialogPlop;
   setIsLoadingGlobal = setIsLoading;
 
-  const copyPatientList = lodash.cloneDeep(patientList);
+  let copyPatientList = lodash.cloneDeep(patientList);
+
+  // 全患者対象のプラグインで、患者リストが空または未定義の場合、全患者を取得
+  if (
+    plugin.all_patient &&
+    (!copyPatientList || copyPatientList.length === 0) &&
+    !plugin.update_db
+  ) {
+    console.log('[executePlugin] 全患者対象プラグイン: 全患者を取得します');
+    try {
+      const patientsResult = await apiAccess(METHOD_TYPE.GET, '/patientlist');
+      if (patientsResult.statusNum === RESULT.NORMAL_TERMINATION) {
+        const responseData = patientsResult.body as any;
+        if (responseData && responseData.data && Array.isArray(responseData.data)) {
+          copyPatientList = responseData.data.map((patient: any) => {
+            const caseinfo: jesgoCaseDefine = {
+              case_id: (patient.caseId || patient.case_id).toString(),
+              name: patient.patientName || patient.name || '',
+              date_of_birth: patient.date_of_birth || '1900-01-01',
+              date_of_death: patient.date_of_death || '1900-01-01',
+              sex: patient.sex || 'F',
+              his_id: patient.patientId || patient.his_id || '',
+              decline: patient.decline || false,
+              registrant: patient.registrant || -1,
+              last_updated: patient.lastUpdate || patient.last_updated || '1900-01-01',
+              is_new_case: false,
+            };
+            return caseinfo;
+          });
+          console.log(`[executePlugin] 全患者を取得しました: ${copyPatientList.length}件`);
+        } else {
+          console.warn('[executePlugin] 全患者取得: 予期しないAPIレスポンス形式');
+          copyPatientList = [];
+        }
+      } else {
+        console.error('[executePlugin] 全患者取得に失敗しました');
+        copyPatientList = [];
+      }
+    } catch (error) {
+      console.error('[executePlugin] 全患者取得エラー:', error);
+      copyPatientList = [];
+    }
+  }
 
   if (plugin.update_db) {
     // データ登録

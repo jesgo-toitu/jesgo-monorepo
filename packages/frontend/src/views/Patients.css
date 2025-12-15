@@ -146,15 +146,15 @@
 }
 
 .normal table tbody {
-  height: calc(100vh - 14.9rem);
+  height: calc(100vh - 14.9rem - 70px);
 }
 
 .search_on table tbody {
-  height: calc(100vh - 23rem);
+  height: calc(100vh - 23rem - 70px);
 }
 
 .detail_on table tbody {
-  height: calc(100vh - 32rem);
+  height: calc(100vh - 32rem - 70px);
 }
 
 .patients tbody tr {

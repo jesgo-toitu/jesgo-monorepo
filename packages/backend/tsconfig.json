@@ -89,6 +89,16 @@
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
   },
+  "ts-node": {
+    "transpileOnly": true,
+    "files": true,
+    "compilerOptions": {
+      "module": "commonjs",
+      "target": "es2016",
+      "esModuleInterop": true,
+      "skipLibCheck": true
+    }
+  },
   "include": [
     "backendapp/**/*"
   ],

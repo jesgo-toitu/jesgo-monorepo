@@ -31,11 +31,33 @@ export const UserMenu = (props: {
   const modalHide = useCallback(() => {}, []);
 
   const modalOk = useCallback(() => {
-    localStorage.removeItem('token');
+    // ログアウト時にプリセット設定を保存（localStorageに保存されているため自動的に保持される）
     setShow(false);
     RemoveBeforeUnloadEvent();
+    
+    // tokenと認証情報を削除
+    localStorage.removeItem('token');
+    localStorage.removeItem('reflesh_token');
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('display_name');
+    localStorage.removeItem('roll_id');
+    
+    // 権限情報を削除
+    localStorage.removeItem('is_view_roll');
+    localStorage.removeItem('is_add_roll');
+    localStorage.removeItem('is_edit_roll');
+    localStorage.removeItem('is_remove_roll');
+    localStorage.removeItem('is_plugin_registerable');
+    localStorage.removeItem('is_plugin_executable_select');
+    localStorage.removeItem('is_plugin_executable_update');
+    localStorage.removeItem('is_data_manage_roll');
+    localStorage.removeItem('is_system_manage_roll');
+    
+    // プリセットIDは保持（次回ログイン時に使用）
+    // localStorage.removeItem('selected_preset_id'); // コメントアウト：保持する
+    
     navigate('/login');
-  }, [setShow]);
+  }, [setShow, navigate]);
 
   const modalOkPasswordchange = useCallback(() => {
     setShowPassowrdChange(false);
@@ -54,7 +76,7 @@ export const UserMenu = (props: {
       <ButtonToolbar>
         <DropdownButton
           bsSize="small"
-          title={title}
+          title={title || 'ユーザーメニュー'}
           key={i}
           id={`dropdown-basic-${0}`}
         >

@@ -36,6 +36,29 @@ export const SystemMenu = (props: {
     navigate(navigateURL);
   };
 
+  // 複数の権限のいずれかがあればアクセス可能
+  const checkAuthOr = (authNames: string[], navigateURL: string) => {
+    const hasAuth = authNames.some(authName => localStorage.getItem(authName) === 'true');
+    if (!hasAuth) {
+      // eslint-disable-next-line no-alert
+      alert('権限がありません');
+      return;
+    }
+
+    // 権限管理から他の画面に遷移する場合は権限管理の変更チェックをする
+    // 権限管理→利用者管理の場合は画面遷移がないので、スキップする
+    if (
+      isTransitionOk &&
+      !navigateURL.includes('Stafflist') &&
+      !isTransitionOk()
+    ) {
+      return;
+    }
+
+    RemoveBeforeUnloadEvent();
+    navigate(navigateURL);
+  };
+
   const handlUserMaintenance = () => {
     if (isConfirm === null || isConfirm()) {
       checkAuth('is_system_manage_roll', '/Stafflist');
@@ -60,6 +83,13 @@ export const SystemMenu = (props: {
     }
   };
 
+  const handlPresetManager = () => {
+    if (isConfirm === null || isConfirm()) {
+      // 一般ユーザ・上級ユーザ・システムオペレータが表示可能
+      checkAuthOr(['is_view_roll', 'is_system_manage_roll'], '/PresetManager');
+    }
+  };
+
   return (
     <ButtonToolbar>
       <DropdownButton
@@ -72,6 +102,7 @@ export const SystemMenu = (props: {
         <MenuItem onSelect={handlUserMaintenance}>利用者管理</MenuItem>
         <MenuItem onSelect={handlSchemaManager}>スキーマ管理</MenuItem>
         <MenuItem onSelect={handlPluginManager}>プラグイン管理</MenuItem>
+        <MenuItem onSelect={handlPresetManager}>プリセット管理</MenuItem>
         <MenuItem onSelect={handlSystemSettings}>システム設定</MenuItem>
       </DropdownButton>
     </ButtonToolbar>

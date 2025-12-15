@@ -1,6 +1,6 @@
 {
   "name": "@jesgo/common",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "JESGO共通ライブラリ - Frontend/Backend共通の型定義・ユーティリティを提供",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

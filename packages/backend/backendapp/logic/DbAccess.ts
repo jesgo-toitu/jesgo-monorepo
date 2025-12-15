@@ -16,6 +16,23 @@ export class DbAccess {
   }
 
   /**
+   * データベース接続を使用してコールバックを実行し、自動的に接続を閉じる
+   * @param callback データベース接続を使用するコールバック関数
+   * @returns コールバックの戻り値
+   */
+  public static async withConnection<T>(
+    callback: (db: DbAccess) => Promise<T>
+  ): Promise<T> {
+    const dbAccess = new DbAccess();
+    try {
+      await dbAccess.connectWithConf();
+      return await callback(dbAccess);
+    } finally {
+      await dbAccess.end();
+    }
+  }
+
+  /**
    * 接続
    * @param {string} host
    * @param {number} port

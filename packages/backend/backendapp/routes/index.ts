@@ -24,12 +24,14 @@ import {
 import {
   deletePatient,
   searchPatientRequest,
+  searchPatientRequestBody,
   searchPatients,
 } from '../services/SearchPatient';
 import { repairChildSchema, uploadZipFile } from '../services/JsonToDatabase';
 import Router from 'express-promise-router';
 import {
   getCaseAndDocument,
+  getCasesAndDocuments,
   getInfiniteLoopBlackList,
   getJsonSchema,
   getRootSchemaIds,
@@ -61,6 +63,15 @@ import {
   updatePluginExecute,
   uploadPluginZipFile,
 } from '../services/Plugin';
+import {
+  getPresetList,
+  getPresetDetail,
+  getFixedFieldMaster,
+  savePreset,
+  deletePreset,
+  getFixedFieldList,
+  PresetDetailData
+} from '../services/Presets';
 import routing from './routing';
 
 const app = express();
@@ -544,6 +555,82 @@ router.get('/patientlist', async (req, res, next) => {
   }
 });
 
+// POSTエンドポイント：リクエストボディから絞り込み条件を取得
+router.post('/patientlist', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/patientlist (POST)',
+    getUsernameFromRequest(req)
+  );
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(
+    getToken(req),
+    roll.login
+  );
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+  } else {
+    if (authResult.body) {
+      // リクエストボディとクエリパラメータをマージ
+      const body = req.body as searchPatientRequestBody;
+      const queryParams = req.query as searchPatientRequest;
+      
+      logging(
+        LOGTYPE.DEBUG,
+        `POST /patientlist: req.body=${JSON.stringify(req.body)}, body.presetFilters=${JSON.stringify(body.presetFilters)}, queryParams.presetFilters=${queryParams.presetFilters}`,
+        'router'
+      );
+      
+      // リクエストボディからクエリパラメータ形式に変換
+      const query: searchPatientRequest = {
+        initialTreatmentDate: body.initialTreatmentDate || queryParams.initialTreatmentDate || '',
+        cancerType: body.cancerType || queryParams.cancerType || '',
+        showOnlyTumorRegistry: body.showOnlyTumorRegistry || queryParams.showOnlyTumorRegistry || '',
+        diagnosisDate: body.diagnosisDate || queryParams.diagnosisDate || '',
+        eventDateType: body.eventDateType || queryParams.eventDateType || '',
+        eventDate: body.eventDate || queryParams.eventDate || '',
+        checkOfDiagnosisDate: body.checkOfDiagnosisDate || queryParams.checkOfDiagnosisDate || '',
+        checkOfBlankFields: body.checkOfBlankFields || queryParams.checkOfBlankFields || '',
+        advancedStage: body.advancedStage || queryParams.advancedStage || '',
+        pathlogicalDiagnosis: body.pathlogicalDiagnosis || queryParams.pathlogicalDiagnosis || '',
+        initialTreatment: body.initialTreatment || queryParams.initialTreatment || '',
+        complications: body.complications || queryParams.complications || '',
+        threeYearPrognosis: body.threeYearPrognosis || queryParams.threeYearPrognosis || '',
+        fiveYearPrognosis: body.fiveYearPrognosis || queryParams.fiveYearPrognosis || '',
+        showProgressAndRecurrence: body.showProgressAndRecurrence || queryParams.showProgressAndRecurrence || '',
+        page: body.page?.toString() || queryParams.page || undefined,
+        pageSize: body.pageSize?.toString() || queryParams.pageSize || undefined,
+        sortColumn: body.sortColumn || queryParams.sortColumn || undefined,
+        sortDirection: body.sortDirection || queryParams.sortDirection || undefined,
+        // POSTリクエストボディの場合は配列のまま、クエリパラメータの場合は文字列のまま
+        presetFilters: body.presetFilters ? (body.presetFilters as any) : queryParams.presetFilters || undefined,
+      };
+      
+      logging(
+        LOGTYPE.DEBUG,
+        `POST /patientlist: query.presetFilters=${JSON.stringify(query.presetFilters)}, type=${typeof query.presetFilters}`,
+        'router'
+      );
+      
+      searchPatients(query)
+        .then((result) => res.status(200).send(result))
+        .catch(next);
+    }
+    // 権限が無い場合
+    else {
+      logging(
+        LOGTYPE.ERROR,
+        '権限エラー',
+        'router',
+        '/patientlist (POST)',
+        getUsernameFromRequest(req)
+      );
+    }
+  }
+});
+
 router.delete('/deleteCase/:caseId', async (req, res, next) => {
   logging(
     LOGTYPE.DEBUG,
@@ -644,6 +731,43 @@ router.get('/getCaseAndDocument/:caseId', async (req, res, next) => {
       '権限エラー',
       'router',
       '/getCaseAndDocument',
+      getUsernameFromRequest(req)
+    );
+  }
+});
+
+router.post('/getCasesAndDocuments', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/getCasesAndDocuments',
+    getUsernameFromRequest(req)
+  );
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), roll.view);
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+    return;
+  }
+  if (authResult.body) {
+    const caseIds = req.body.caseIds as number[];
+    if (!Array.isArray(caseIds)) {
+      res.status(200).send({
+        statusNum: RESULT.ABNORMAL_TERMINATION,
+        body: 'caseIds must be an array',
+      });
+      return;
+    }
+    getCasesAndDocuments(caseIds)
+      .then((result) => res.status(200).send(result))
+      .catch(next);
+  } else {
+    logging(
+      LOGTYPE.ERROR,
+      '権限エラー',
+      'router',
+      '/getCasesAndDocuments',
       getUsernameFromRequest(req)
     );
   }
@@ -784,10 +908,10 @@ router.get('/gettree/', async (req, res, next) => {
     '/gettree',
     getUsernameFromRequest(req)
   );
-  // 権限の確認
+  // 権限の確認（一般ユーザ・上級ユーザ・システムオペレータがプリセット管理で使用するためview権限に変更）
   const authResult: ApiReturnObject = await checkAuth(
     getToken(req),
-    roll.systemManage
+    [roll.login, roll.view]
   );
   if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
     res.status(200).send(authResult);
@@ -1163,18 +1287,264 @@ router.post('/save-plugin', async (req, res, next) => {
  * プラグイン用 end
  */
 
+/**
+ * プリセット管理用 start
+ */
+
+/**
+ * プリセット一覧取得
+ */
+router.get('/preset-list', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/preset-list',
+    getUsernameFromRequest(req)
+  );
+  
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.view,
+  ]);
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+  } else {
+    if (authResult.body) {
+      getPresetList()
+        .then((result) => res.status(200).send(result))
+        .catch(next);
+    } else {
+      logging(
+        LOGTYPE.ERROR,
+        '権限エラー',
+        'router',
+        '/preset-list',
+        getUsernameFromRequest(req)
+      );
+    }
+  }
+});
+
+/**
+ * プリセット詳細取得
+ */
+router.get('/preset-detail/:presetId', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/preset-detail',
+    getUsernameFromRequest(req)
+  );
+  
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.view,
+  ]);
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+  } else {
+    if (authResult.body) {
+      const presetId = Number(req.params.presetId);
+      getPresetDetail(presetId)
+        .then((result) => res.status(200).send(result))
+        .catch(next);
+    } else {
+      logging(
+        LOGTYPE.ERROR,
+        '権限エラー',
+        'router',
+        '/preset-detail',
+        getUsernameFromRequest(req)
+      );
+    }
+  }
+});
+
+/**
+ * プリセット保存（新規作成・更新）
+ */
+router.post('/preset-save', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/preset-save',
+    getUsernameFromRequest(req)
+  );
+  
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.edit,
+  ]);
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+  } else {
+    if (authResult.body) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const requestBody = req.body as any;
+      
+      // フロントエンドからのリクエスト構造に対応
+      const presetData: PresetDetailData = requestBody.data || requestBody;
+      
+      // パラメータの存在確認
+      if (!presetData || !presetData.preset_name || !presetData.fields) {
+        logging(LOGTYPE.ERROR, `Missing required parameters: ${JSON.stringify(presetData)}`, 'router', '/preset-save');
+        res.status(400).send({ statusNum: RESULT.FAILED_USER_ERROR, body: '必須パラメータが不足しています' });
+        return;
+      }
+      
+      savePreset(presetData, req)
+        .then((result) => res.status(200).send(result))
+        .catch(next);
+    } else {
+      logging(
+        LOGTYPE.ERROR,
+        '権限エラー',
+        'router',
+        '/preset-save',
+        getUsernameFromRequest(req)
+      );
+    }
+  }
+});
+
+/**
+ * プリセット削除
+ */
+router.delete('/preset-delete/:presetId', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/preset-delete',
+    getUsernameFromRequest(req)
+  );
+  
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.remove,
+  ]);
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+  } else {
+    if (authResult.body) {
+      const presetId = Number(req.params.presetId);
+      const userId = getUserIdFromRequest(req);
+      
+      logging(
+        LOGTYPE.DEBUG,
+        `削除処理開始 - presetId: ${presetId}, userId: ${userId}`,
+        'router',
+        '/preset-delete'
+      );
+      
+      deletePreset(presetId, userId)
+        .then((result) => res.status(200).send(result))
+        .catch(next);
+    } else {
+      logging(
+        LOGTYPE.ERROR,
+        '権限エラー',
+        'router',
+        '/preset-delete',
+        getUsernameFromRequest(req)
+      );
+    }
+  }
+});
+
+/**
+ * 固定項目一覧取得
+ */
+router.get('/fixed-field-list', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/fixed-field-list',
+    getUsernameFromRequest(req)
+  );
+  
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.view,
+  ]);
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+  } else {
+    if (authResult.body) {
+      getFixedFieldList()
+        .then((result) => res.status(200).send(result))
+        .catch(next);
+    } else {
+      logging(
+        LOGTYPE.ERROR,
+        '権限エラー',
+        'router',
+        '/fixed-field-list',
+        getUsernameFromRequest(req)
+      );
+    }
+  }
+});
+
+/**
+ * プリセット管理用 end
+ */
+
+/**
+ * 固定項目マスターデータ取得
+ */
+router.get('/fixed-field-master', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/fixed-field-master',
+    getUsernameFromRequest(req)
+  );
+  
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.edit,
+  ]);
+  if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
+    res.status(200).send(authResult);
+  } else {
+    if (authResult.body) {
+      getFixedFieldMaster()
+        .then((result) => res.status(200).send(result))
+        .catch(next);
+    } else {
+      logging(
+        LOGTYPE.ERROR,
+        '権限エラー',
+        'router',
+        '/fixed-field-master',
+        getUsernameFromRequest(req)
+      );
+    }
+  }
+});
+
 // -------------------------------------------------
 //  以下、何のルーティングにもマッチしないorエラー
 // -------------------------------------------------
 
 // いずれのルーティングにもマッチしない(==NOT FOUND)
-app.use((req, res) => {
+router.use((req, res) => {
   res.status(404);
-  res.render('error', {
-    param: {
-      status: 404,
-      message: 'not found',
-    },
+  res.json({
+    statusNum: RESULT.ABNORMAL_TERMINATION,
+    body: `Route not found: ${req.method} ${req.path}`,
   });
 });
 

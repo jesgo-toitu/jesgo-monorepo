@@ -104,12 +104,16 @@ const ErrorRow = React.memo(
       <div className="content-area">
         <div className="error-msg-jesgo-err-div">
           {typeof errMsgObj !== 'string' &&
-            errMsgObj.message.split('\n').map((item, index) => (
-              <React.Fragment key={index}>
+            errMsgObj.message.split('\n').map((item, index) => {
+              const isWarning = item.includes('要確認');
+              return (
+                <React.Fragment key={index}>
                 {index > 0 && <br />}
-                {item}
+                <span style={{ color: isWarning ? 'orange' : 'inherit' }}>{item}</span>
               </React.Fragment>
-            ))}
+              );
+            }
+          )}
           {errMsgObj.showDeleteButton && (
             <Button
               bsClass="btn btn-xs"

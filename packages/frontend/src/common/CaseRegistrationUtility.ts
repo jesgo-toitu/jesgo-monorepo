@@ -31,7 +31,11 @@ export const popJesgoError = (formData: any, deleteError = false) => {
     if (formData[Const.EX_VOCABULARY.JESGO_ERROR]) {
       // 取り出して元のformDataからは削除
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      popValue = formData[Const.EX_VOCABULARY.JESGO_ERROR];
+      const errorValue = formData[Const.EX_VOCABULARY.JESGO_ERROR];
+      // 配列でない場合は配列に変換
+      if (Array.isArray(errorValue)) {
+        popValue = errorValue;
+      }
       // jesgo:error削除する場合
       if (deleteError) {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, no-param-reassign
@@ -555,6 +559,11 @@ export const validateJesgoDocument = (saveData: SaveDataObjDefine) => {
           documentId,
         });
       }
+
+      // jesgo:errorの検証を追加
+      // プラグイン実行後にjesgo:errorがデータベースに保存された場合、
+      // 再読み込み時にエラーが表示されるようにする
+      AddJesgoError(errors, formData, documentId, schemaId, schema);
     }
   });
   return errors;
@@ -1190,31 +1199,87 @@ export const OpenOutputView = (
   srcData: any,
   type: string | undefined = undefined
 ) => {
+  // デバッグ: OpenOutputView関数が呼ばれたことをログ出力
+  console.log('[OpenOutputView] 関数が呼ばれました:', {
+    type: typeof srcData,
+    isArray: Array.isArray(srcData),
+    isNull: srcData == null,
+    value: srcData,
+    stringified: typeof srcData === 'string' ? srcData : JSON.stringify(srcData),
+  });
+
   // 表示データがない場合は開かない
   if (srcData == null) {
+    console.log('[OpenOutputView] srcDataがnullのため、処理を中断');
     return;
   }
 
   const postData = (e: MessageEvent<any>) => {
+    console.log('[OpenOutputView] postDataが呼ばれました:', {
+      origin: e.origin,
+      winOrigin: win.location.origin,
+      data: e.data,
+      isOutputReady: e.data === 'output_ready',
+      originMatch: e.origin === win.location.origin,
+    });
+
     // 画面の準備ができたらデータをポストする
     if (e.origin === win.location.origin && e.data === 'output_ready') {
+      console.log('[OpenOutputView] 条件が満たされました。データを送信します。');
+      // デバッグ: OpenOutputViewで受け取ったデータをログ出力
+      console.log('[OpenOutputView] 送信するデータ:', {
+        type: typeof srcData,
+        isArray: Array.isArray(srcData),
+        isNull: srcData == null,
+        value: srcData,
+        stringified: typeof srcData === 'string' ? srcData : JSON.stringify(srcData),
+      });
+
       if (type && type === 'overwritelog') {
         e.source?.postMessage({ viewerType: 'log', csvData: srcData });
-      } else if (Array.isArray(srcData) && srcData.length > 0) {
-        if (Array.isArray(srcData[0])) {
-          e.source?.postMessage(srcData);
+      } else {
+        // すべてのデータをjsonDataプロパティとして送信（配列、オブジェクト、文字列すべて）
+        // これにより、受信側で一貫してjsonDataプロパティをチェックできる
+        let dataToSend: any;
+        
+        if (typeof srcData === 'string') {
+          // 文字列の場合、JSON文字列の可能性をチェック
+          try {
+            const parsed = JSON.parse(srcData);
+            console.log('[OpenOutputView] JSON文字列をパースしてJSON形式として送信');
+            dataToSend = { jsonData: parsed };
+          } catch {
+            // JSONでない場合は文字列として送信（文字列の場合はjsonDataプロパティを使わない）
+            console.log('[OpenOutputView] 文字列として送信');
+            dataToSend = srcData;
+          }
         } else {
-          e.source?.postMessage({ jsonData: srcData });
+          // 配列、オブジェクト、その他の場合、すべてjsonDataとして送信
+          console.log('[OpenOutputView] データをjsonDataプロパティとして送信:', {
+            type: typeof srcData,
+            isArray: Array.isArray(srcData),
+          });
+          dataToSend = { jsonData: srcData };
         }
-      } else if (srcData) {
-        e.source?.postMessage(srcData);
+        
+        console.log('[OpenOutputView] 実際に送信するデータ:', dataToSend);
+        e.source?.postMessage(dataToSend);
       }
       win.removeEventListener('message', postData, false);
+    } else {
+      console.log('[OpenOutputView] 条件が満たされませんでした:', {
+        originMatch: e.origin === win.location.origin,
+        dataMatch: e.data === 'output_ready',
+        actualData: e.data,
+        actualOrigin: e.origin,
+      });
     }
   };
 
+  console.log('[OpenOutputView] messageイベントリスナーを登録しました');
   win.addEventListener('message', postData, false);
 
+  console.log('[OpenOutputView] OutputViewウィンドウを開きます');
   win.open('/OutputView', 'outputview');
 };
 

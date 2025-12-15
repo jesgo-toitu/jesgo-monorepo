@@ -13,6 +13,9 @@ import './biz-udpgothic.css';
 import SchemaManager from './views/SchemaManager';
 import OutputView from './components/common/OutputView';
 import PluginManager from './views/PluginManager';
+import PresetManager from './views/PresetManager';
+import PatientListPresetManager from './views/PatientListPresetManager';
+import PresetDocumentTestView from './views/PresetDocumentTestView';
 import { Const } from './common/Const'
 
 const RedirectToLogin = () => <Navigate to="/Login" />;
@@ -36,6 +39,9 @@ ReactDOM.render(
         <Route path="/SchemaManager" element={<SchemaManager />} />
         <Route path="/OutputView" element={<OutputView />} />
         <Route path="/PluginManager" element={<PluginManager />} />
+        <Route path="/PresetManager" element={<PresetManager />} />
+        <Route path="/PatientListPresetManager" element={<PatientListPresetManager />} />
+        <Route path="/PresetDocumentTest" element={<PresetDocumentTestView />} />
       </Routes>
     </BrowserRouter>
   </Provider>,

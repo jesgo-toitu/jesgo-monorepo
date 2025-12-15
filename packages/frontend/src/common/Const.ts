@@ -5,7 +5,7 @@ import { Const as ConstCommon } from '@jesgo/common';
 /* eslint-disable @typescript-eslint/no-namespace */
 export namespace Const {
   // JESGO Webアプリバージョン
-  export const VERSION = '1.4';
+  export const VERSION = '1.5';
 
   // 共通パッケージからの定数を再エクスポート
   export const JESGO_TAG = ConstCommon.JESGO_TAG;

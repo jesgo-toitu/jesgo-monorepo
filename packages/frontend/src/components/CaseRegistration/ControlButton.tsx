@@ -15,8 +15,11 @@ import store from '../../store/index';
 import { ChildTabSelectedFuncObj, RegistrationErrors } from './Definition';
 import { Const } from '../../common/Const';
 import { GetRootSchema, GetSchemaInfo } from './SchemaUtility';
-import { fTimeout } from '../../common/CommonUtility';
-import { executePlugin, jesgoPluginColumns } from '../../common/Plugin';
+import {
+  executePlugin,
+  executePluginWithTimeout,
+  jesgoPluginColumns,
+} from '../../common/Plugin';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
 import { LoadPluginList } from '../../common/DBUtility';
 import { reloadState } from '../../views/Registration';
@@ -360,35 +363,21 @@ export const ControlButton = React.memo((props: ControlButtonProps) => {
         }
 
         case eventKey.startsWith('plugin_') && eventKey: {
-          setIsLoading(true);
           const f = async () => {
             if (plugin) {
-              await Promise.race([
-                fTimeout(Const.PLUGIN_TIMEOUT_SEC),
-                executePlugin(
-                  plugin,
-                  [store.getState().formDataReducer.saveData.jesgo_case],
-                  Number(documentId),
-                  setReload,
-                  setIsLoading,
-                  setOverwriteDialogPlop
-                ),
-              ])
-                .then((res) => {
-                  if (plugin && !plugin.update_db) {
-                    // eslint-disable-next-line
-                    OpenOutputView(window, res);
-                  }
-                })
-                .catch((err) => {
-                  if (err === 'timeout') {
-                    // eslint-disable-next-line no-alert
-                    alert('操作がタイムアウトしました');
-                  }
-                })
-                .finally(() => {
-                  setIsLoading(false);
-                });
+              await executePluginWithTimeout(
+                plugin,
+                () =>
+                  executePlugin(
+                    plugin,
+                    [store.getState().formDataReducer.saveData.jesgo_case],
+                    Number(documentId),
+                    setReload,
+                    setIsLoading,
+                    setOverwriteDialogPlop
+                  ),
+                setIsLoading
+              );
             } else {
               // eslint-disable-next-line no-alert
               alert('不正な入力です。');

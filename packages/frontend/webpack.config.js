@@ -1,6 +1,7 @@
 "use strict";
 const path = require('path');  //path モジュールの読み込み
 const Dotenv = require('dotenv-webpack');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 let enviroment = 'development';
 const modeIdx = process.argv.findIndex(arg => arg.toLowerCase() === '--mode');
 if(modeIdx > -1 && process.argv.length > modeIdx + 1) {
@@ -14,13 +15,17 @@ const frontendPort = process.env.PORT
     ? parseInt(process.env.FRONTEND_PORT, 10) 
     : 3000;
 
+// Docker環境でのWebSocket URL設定
+const webSocketPort = process.env.WEBPACK_PORT || 3000;
+const webSocketHost = process.env.WEBPACK_HOST || 'localhost';
+
 module.exports = {
   mode: 'development',  //モード
   entry: './src/Index.tsx',  //エントリポイント（デフォルトと同じ設定）
   output: {  //出力先（デフォルトと同じ設定）
     filename: 'main.js',
     path: path.resolve(__dirname, 'dist'),
-    // publicPath: '/public/' // (*)
+    publicPath: '/',  // webpack-dev-serverで正しく動作させるために必要
   },
   resolve: {
     modules: [ "./node_modules" ],
@@ -91,13 +96,44 @@ module.exports = {
     new Dotenv({
       path: path.resolve(__dirname, `.env.${enviroment}`)
     }),
+    new HtmlWebpackPlugin({
+      template: path.resolve(__dirname, 'src/index.html'),
+      filename: 'index.html',
+      inject: 'body',
+    }),
   ],
   devServer: {
     port: frontendPort,
     host: '0.0.0.0',
-    historyApiFallback: true,
+    historyApiFallback: {
+      index: '/index.html',
+      disableDotRule: true,
+    },
+    hot: true,
+    liveReload: true,
+    allowedHosts: 'all',
+    compress: true,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+      'Access-Control-Allow-Headers': 'X-Requested-With, content-type, Authorization',
+    },
+    webSocketServer: 'ws',
+    watchFiles: {
+      paths: ['src/**/*', '../common/src/**/*', '../settings/**/*'],
+      options: {
+        usePolling: true,
+        interval: 1000,
+      },
+    },
     client: {
-      webSocketURL: `ws://localhost:${frontendPort}/ws`,
+      webSocketURL: `ws://${webSocketHost}:${webSocketPort}/ws`,
+      overlay: {
+        errors: true,
+        warnings: false,
+      },
+      logging: 'warn',
+      reconnect: true,
     },
     static: [
       {

@@ -11,7 +11,7 @@ import {
  */
 const DEFAULT_CONFIG: WebAppConfig = {
   webAppPort: 3030,
-  endPointUrl: 'http://localhost:8000/',
+  endPointUrl: 'http://localhost:8000',
 };
 
 /**

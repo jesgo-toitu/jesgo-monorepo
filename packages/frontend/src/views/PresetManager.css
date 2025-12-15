@@ -1,0 +1,27 @@
+.preset-list {
+  width: 96%;
+  margin: 2rem 2%;
+  margin-top: 7rem;
+  white-space: pre-wrap;
+  overflow-y: scroll;
+  height: calc(100vh - 12rem);
+}
+
+.preset-table thead {
+  background-color: whitesmoke;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.preset-table-short {
+  width: 10rem;
+}
+
+/* プリセット編集モーダル専用の幅設定 - dialogClassNameで適用 */
+.preset-edit-modal-dialog {
+  width: 98% !important;
+  max-width: 98% !important;
+  min-width: 1200px !important;
+}
+

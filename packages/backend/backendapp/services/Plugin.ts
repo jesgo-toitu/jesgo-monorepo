@@ -23,6 +23,7 @@ import {
 import lodash from 'lodash';
 import { logging, LOGTYPE } from '../logic/Logger';
 import { readdirSync, rename } from 'fs';
+import { listFilesRecursive } from '../logic/FileUtility';
 import * as fs from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
@@ -818,17 +819,10 @@ export const uploadPluginZipFile = async (
         throw new Error('.zipファイルか.jsファイルを指定してください.');
     }
 
-    const listFiles = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((dirent) =>
-        dirent.isFile()
-          ? [`${dir}/${dirent.name}`]
-          : listFiles(`${dir}/${dirent.name}`)
-      );
-
     let fileList: string[] = [];
 
     try {
-      fileList = listFiles(dirPath);
+      fileList = listFilesRecursive(dirPath);
     } catch {
       logging(
         LOGTYPE.ERROR,
@@ -1290,7 +1284,15 @@ export const updatePluginExecute = async (updateObjects: updateObjects) => {
             | undefined;
           const toStr = typeof to === 'string' ? to : JSON.stringify(to);
 
-          if (from && !isEmpty && fromStr !== toStr && fromStr !== '') {
+          // jesgo:errorは常にupdateListに追加（上書き確認不要）
+          if (key === '/jesgo:error') {
+            const tmpUpdateCheckObj: updateCheckObject = {
+              pointer: key,
+              record: record,
+              document_id: documentId,
+            };
+            updateList.push(tmpUpdateCheckObj);
+          } else if (from && !isEmpty && fromStr !== toStr && fromStr !== '') {
             const tmpTitle =
               docIdBasedNameObjects?.find((p) => p.document_id === documentId)
                 ?.fullPath ?? '';

@@ -81,7 +81,7 @@ npm run prod-start
 
 ## 共通パッケージの使用
 
-v1.4.0から、`@jesgo/common` パッケージを使用して、設定の読み込みや型定義を共通化しています。
+v1.5.0から、`@jesgo/common` パッケージを使用して、設定の読み込みや型定義を共通化しています。
 
 詳細は `/packages/common/README.md` を参照してください。
 

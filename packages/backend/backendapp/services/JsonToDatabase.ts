@@ -1,6 +1,7 @@
 import { DbAccess } from '../logic/DbAccess';
 import { readFileSync, readdirSync, rename } from 'fs';
 import { ApiReturnObject, RESULT } from '../logic/ApiCommon';
+import { listFilesRecursive } from '../logic/FileUtility';
 import lodash from 'lodash';
 import { logging, LOGTYPE } from '../logic/Logger';
 import { Open } from 'unzipper';
@@ -847,6 +848,10 @@ const fileListInsert = async (
           subqueryValues
         );
       }
+
+      // 新規スキーマが登録された場合、schema_primary_id=0のスキーマに新しいスキーマIDを追加
+      await addNewSchemaToRootSchema(oldJsonData[0].schema_id);
+
       updateNum++;
     }
   }
@@ -1102,6 +1107,45 @@ export const schemaListUpdate = async (updateAll = false) => {
   return updateCount;
 };
 
+/**
+ * 新規登録されたスキーマIDをschema_primary_id=0のスキーマのsubschemaとsubschema_defaultに追加する
+ * @param newSchemaId 新規登録されたスキーマID
+ */
+const addNewSchemaToRootSchema = async (newSchemaId: number) => {
+  logging(LOGTYPE.DEBUG, `新規スキーマID ${newSchemaId} をルートスキーマに追加`, 'JsonToDatabase', 'addNewSchemaToRootSchema');
+  
+  try {
+    // schema_primary_id=0のスキーマの現在のsubschemaとsubschema_defaultを取得
+    const rootSchemaRows = (await dbAccess.query(
+      'SELECT subschema, subschema_default FROM jesgo_document_schema WHERE schema_primary_id = 0'
+    )) as { subschema: number[]; subschema_default: number[] }[];
+    
+    if (rootSchemaRows.length > 0) {
+      const currentSubschema = rootSchemaRows[0].subschema || [];
+      const currentSubschemaDefault = rootSchemaRows[0].subschema_default || [];
+      
+      // 新しいスキーマIDが既に含まれていない場合のみ追加
+      if (!currentSubschema.includes(newSchemaId)) {
+        const updatedSubschema = [...currentSubschema, newSchemaId];
+        const updatedSubschemaDefault = [...currentSubschemaDefault, newSchemaId];
+        
+        await dbAccess.query(
+          'UPDATE jesgo_document_schema SET subschema = $1, subschema_default = $2 WHERE schema_primary_id = 0',
+          [updatedSubschema, updatedSubschemaDefault]
+        );
+        
+        logging(LOGTYPE.DEBUG, `ルートスキーマのsubschemaにスキーマID ${newSchemaId} を追加しました`, 'JsonToDatabase', 'addNewSchemaToRootSchema');
+      } else {
+        logging(LOGTYPE.DEBUG, `スキーマID ${newSchemaId} は既にルートスキーマのsubschemaに含まれています`, 'JsonToDatabase', 'addNewSchemaToRootSchema');
+      }
+    } else {
+      logging(LOGTYPE.WARN, `schema_primary_id=0のスキーマが見つかりません`, 'JsonToDatabase', 'addNewSchemaToRootSchema');
+    }
+  } catch (error) {
+    logging(LOGTYPE.ERROR, `ルートスキーマへのスキーマID追加でエラーが発生しました: ${error}`, 'JsonToDatabase', 'addNewSchemaToRootSchema');
+  }
+};
+
 const updateRootSchemaList = async () => {
   const dbRows = (await dbAccess.query(
     `SELECT ARRAY_AGG(DISTINCT(schema_id)) as root_ids FROM view_latest_schema WHERE document_schema->>'jesgo:parentschema' like '%"/"%';`
@@ -1246,15 +1290,7 @@ export const jsonToSchema = async (): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, `呼び出し`, 'JsonToDatabase', 'jsonToSchema');
   const dirPath = './backendapp/import';
 
-  const listFiles = (dir: string): string[] =>
-    readdirSync(dir, { withFileTypes: true }).flatMap((dirent) =>
-      dirent.isFile()
-        ? [`${dir}/${dirent.name}`]
-        : listFiles(`${dir}/${dirent.name}`)
-    );
-
-  let fileList: string[] = [];
-  fileList = listFiles(dirPath);
+  const fileList = listFilesRecursive(dirPath);
   try {
     await dbAccess.connectWithConf();
     await dbAccess.query('BEGIN');
@@ -1308,16 +1344,9 @@ export const uploadZipFile = async (data: any): Promise<ApiReturnObject> => {
         throw new Error('.zipファイルか.jsonファイルを指定してください.');
     }
 
-    const listFiles = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((dirent) =>
-        dirent.isFile()
-          ? [`${dir}/${dirent.name}`]
-          : listFiles(`${dir}/${dirent.name}`)
-      );
-
     let fileList: string[] = [];
     try {
-      fileList = listFiles(dirPath);
+      fileList = listFilesRecursive(dirPath);
     } catch {
       logging(
         LOGTYPE.ERROR,

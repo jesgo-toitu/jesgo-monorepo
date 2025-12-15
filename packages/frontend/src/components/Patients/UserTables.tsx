@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Button,
   ButtonGroup,
@@ -9,7 +9,7 @@ import {
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
-import { formatDateStr } from '../../common/CommonUtility';
+import { formatDateStr, compareValues } from '../../common/CommonUtility';
 import IconList from './IconList';
 
 export interface userData {
@@ -40,27 +40,94 @@ export interface userDataList {
   data: userData[];
 }
 
+type SortColumn = 
+  | 'patientId'
+  | 'patientName'
+  | 'age'
+  | 'startDate'
+  | 'lastUpdate'
+  | 'diagnosis'
+  | 'advancedStage'
+  | null;
+
+type SortDirection = 'asc' | 'desc' | null;
+
 const makeTable = (props: {
   userListJson: string;
   search: string;
   noSearch: string;
   setUserListJson: React.Dispatch<React.SetStateAction<string>>;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  currentPage?: number;
+  pageSize?: number;
+  sortColumn?: SortColumn;
+  sortDirection?: SortDirection;
+  onSortChange?: (column: SortColumn, direction: SortDirection) => void;
 }) => {
   const [userList, setUserList] = useState<userData[]>([]);
-  const { userListJson, search, noSearch, setUserListJson, setIsLoading } =
+  const { userListJson, search, noSearch, setUserListJson, setIsLoading, currentPage = 1, pageSize = 50, sortColumn: propSortColumn, sortDirection: propSortDirection, onSortChange } =
     props;
-  let userDataListJson: userDataList;
 
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
+  // バックエンドでソート・ページング処理が行われるため、データをそのまま表示
   useEffect(() => {
-    if (userListJson.length > 0) {
-      userDataListJson = JSON.parse(userListJson) as userDataList;
-      setUserList(userDataListJson.data);
+    if (userListJson.length === 0) {
+      setUserList([]);
+      return;
+    }
+    
+    try {
+      const parsedData = JSON.parse(userListJson) as userDataList;
+      // バックエンドで既にソート・ページング処理が行われているため、そのまま使用
+      setUserList(parsedData.data || []);
+    } catch (error) {
+      console.error('データの解析エラー:', error);
+      setUserList([]);
     }
   }, [userListJson]);
+
+  // ヘッダークリック時のソート切り替え
+  const handleSort = (column: SortColumn) => {
+    if (!onSortChange) return;
+    
+    if (propSortColumn === column) {
+      // 同じカラムをクリックした場合は昇順→降順→ソートなしの順で切り替え
+      if (propSortDirection === 'asc') {
+        onSortChange(column, 'desc');
+      } else if (propSortDirection === 'desc') {
+        onSortChange(null, null);
+      } else {
+        onSortChange(column, 'asc');
+      }
+    } else {
+      // 新しいカラムをクリックした場合は昇順でソート
+      onSortChange(column, 'asc');
+    }
+  };
+
+  // ソートアイコンの取得
+  const getSortIcon = (column: SortColumn) => {
+    if (propSortColumn !== column || propSortDirection === null) {
+      return (
+        <span style={{ marginLeft: '5px', opacity: 0.5 }}>
+          <Glyphicon glyph="sort" />
+        </span>
+      );
+    }
+    return propSortDirection === 'asc' 
+      ? (
+        <span style={{ marginLeft: '5px' }}>
+          <Glyphicon glyph="chevron-up" />
+        </span>
+      )
+      : (
+        <span style={{ marginLeft: '5px' }}>
+          <Glyphicon glyph="chevron-down" />
+        </span>
+      );
+  };
 
   const deletePatient = async (
     caseId: number,
@@ -121,16 +188,42 @@ const makeTable = (props: {
     <Table striped className="patients">
       <thead>
         <tr>
-          <th>患者ID</th>
-          <th>患者名</th>
-          <th className={noSearch}>年齢</th>
+          <th 
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => handleSort('patientId')}
+          >
+            患者ID{getSortIcon('patientId')}
+          </th>
+          <th 
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => handleSort('patientName')}
+          >
+            患者名{getSortIcon('patientName')}
+          </th>
+          <th 
+            className={noSearch}
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => handleSort('age')}
+          >
+            年齢{getSortIcon('age')}
+          </th>
           <th className={noSearch}>
             初回治療開始日
             <br />
             ／最終更新日
           </th>
-          <th>診断</th>
-          <th>進行期</th>
+          <th 
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => handleSort('diagnosis')}
+          >
+            診断{getSortIcon('diagnosis')}
+          </th>
+          <th 
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => handleSort('advancedStage')}
+          >
+            進行期{getSortIcon('advancedStage')}
+          </th>
           <th className={search}>初回治療</th>
           <th className={search}>登録</th>
           <th className={search}>3年予後</th>
@@ -239,3 +332,4 @@ const makeTable = (props: {
 };
 
 export default makeTable;
+export type { userData };

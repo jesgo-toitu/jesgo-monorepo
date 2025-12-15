@@ -695,11 +695,12 @@ const customSchemaAppendFormDataProperty = (
 };
 
 /**
- * Schemaの書き換え
+ * Schemaの書き換え（customSchemaAppendFormDataPropertyを実行しない版）
+ * 条件変更検出用
  * @param props
  * @returns
  */
-export const CustomSchema = (props: {
+export const CustomSchemaWithoutAppend = (props: {
   orgSchema: JSONSchema7;
   formData: any;
 }) => {
@@ -738,6 +739,25 @@ export const CustomSchema = (props: {
       schema = customSchemaIfThenElse(allOfItem, schema, formData);
     });
   }
+
+  // customSchemaAppendFormDataPropertyは実行しない
+
+  return schema;
+};
+
+/**
+ * Schemaの書き換え
+ * @param props
+ * @returns
+ */
+export const CustomSchema = (props: {
+  orgSchema: JSONSchema7;
+  formData: any;
+}) => {
+  const { orgSchema, formData } = props; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+  // customSchemaAppendFormDataPropertyを実行しない版でスキーマを生成
+  let schema = CustomSchemaWithoutAppend({ orgSchema, formData });
 
   // formDataにしかない項目を表示するため、スキーマ書き換え(途中でスキーマ変わった場合の対策)
   schema = customSchemaAppendFormDataProperty(schema, formData);

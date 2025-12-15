@@ -11,7 +11,8 @@
   },
   "webApp": {
     "webAppPort": 3000,
-    "endPointUrl": "http://localhost:8000/"
+    "endPointUrl": "http://localhost:8000",
+    "defaultPageSize": 50
   }
 }
 
