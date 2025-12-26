@@ -31,7 +31,7 @@ import { UserMenu } from '../components/common/UserMenu';
 import { SystemMenu } from '../components/common/SystemMenu';
 import { settingsFromApi } from './Settings';
 import { csvHeader, patientListCsv } from '../common/MakeCsv';
-import { formatDate, formatTime } from '../common/CommonUtility';
+import { formatDate, formatTime, compareValues } from '../common/CommonUtility';
 import { Const } from '../common/Const';
 import Loading from '../components/CaseRegistration/Loading';
 import { storeSchemaInfo } from '../components/CaseRegistration/SchemaUtility';
@@ -219,8 +219,8 @@ const Patients = () => {
   const pageSizeOptions = [10, 25, 50, 100];
   const [totalCount, setTotalCount] = useState<number>(0);
   
-  // ソート関連の状態
-  const [sortColumn, setSortColumn] = useState<'patientId' | 'patientName' | 'age' | 'startDate' | 'lastUpdate' | 'diagnosis' | 'advancedStage' | null>(null);
+  // ソート関連の状態（カスタム項目の場合は 'custom_${field_id}' 形式）
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
 
   // プリセット項目の絞り込み条件の状態管理
@@ -378,24 +378,51 @@ const Patients = () => {
     }
   }, [reload]);
 
-  // 設定ファイルから初期表示件数を読み込む（初回マウント時のみ）
+  // 設定から初期表示件数を読み込む（初回マウント時のみ）
   useEffect(() => {
-    const loadConfig = async () => {
+    const loadDefaultPageSize = async () => {
       try {
-        const configResponse = await axios.get('./config.json');
-        const configJson = configResponse.data as { webApp: WebAppConfig };
-        const config = configJson.webApp || {};
-        const defaultSize = config.defaultPageSize || 50;
-        setDefaultPageSize(defaultSize);
-        setPageSize(defaultSize);
+        // jesgo_system_settingから設定を取得
+        const returnApiObject = await apiAccess(METHOD_TYPE.GET, `getSettings`);
+        
+        if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
+          const returned = returnApiObject.body as settingsFromApi;
+          // default_page_sizeの数値変換（無効な値の場合はデフォルト値100を使用）
+          const pageSize = Number(returned.default_page_size);
+          const validPageSize = isNaN(pageSize) || ![10, 25, 50, 100].includes(pageSize) ? 100 : pageSize;
+          setDefaultPageSize(validPageSize);
+          setPageSize(validPageSize);
+        } else {
+          // APIエラー時はデフォルト値（100）を使用
+          setDefaultPageSize(100);
+          setPageSize(100);
+        }
       } catch (error) {
-        // エラー時はデフォルト値（50）を使用
-        setDefaultPageSize(50);
-        setPageSize(50);
+        // エラー時はデフォルト値（100）を使用
+        setDefaultPageSize(100);
+        setPageSize(100);
       }
     };
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    loadConfig();
+    loadDefaultPageSize();
+  }, []);
+
+  // Settings画面から設定が更新された場合のイベントリスナー
+  useEffect(() => {
+    const handleSettingsUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent<{ default_page_size: number }>;
+      const newPageSize = customEvent.detail?.default_page_size;
+      if (newPageSize && [10, 25, 50, 100].includes(newPageSize)) {
+        setDefaultPageSize(newPageSize);
+        setPageSize(newPageSize);
+        setCurrentPage(1); // 表示件数変更時は1ページ目に戻る
+      }
+    };
+
+    window.addEventListener('settingsUpdated', handleSettingsUpdate);
+    return () => {
+      window.removeEventListener('settingsUpdated', handleSettingsUpdate);
+    };
   }, []);
 
   // ソート、ページング、表示件数が変更されたときに患者リストを再取得
@@ -655,12 +682,24 @@ const Patients = () => {
           if (field.is_fixed) {
             // 固定項目は既存のマッピングを使用
             const headerItems = fieldToCsvHeaderMap[field.field_name] || [];
-            headers.push(...headerItems);
+            // is_csv_header_display_nameがtrueの場合はdisplay_nameを使用
+            if (field.is_csv_header_display_name) {
+              const updatedHeaderItems = headerItems.map(item => ({
+                ...item,
+                label: field.display_name || item.label
+              }));
+              headers.push(...updatedHeaderItems);
+            } else {
+              headers.push(...headerItems);
+            }
           } else {
-            // カスタム項目はdisplay_nameを使用してヘッダーを生成
+            // カスタム項目はis_csv_header_display_nameに応じてヘッダーを生成
             // keyはfield_idをベースに生成して一意性を確保（field_nameは日本語のため使えない）
             const key = `custom_${field.field_id}`;
-            headers.push({ label: field.display_name || field.field_name, key });
+            const headerLabel = field.is_csv_header_display_name 
+              ? (field.display_name || field.field_name)
+              : (field.field_name || field.display_name);
+            headers.push({ label: headerLabel, key });
           }
         }
         
@@ -1317,7 +1356,7 @@ const Patients = () => {
       // ページを1にリセット
       setCurrentPage(1);
       // 腫瘍登録管理表示モードかどうかを判定
-      const isDetailMode = listMode[1] && listMode[1] !== '';
+      const isDetailMode = !!(listMode[1] && listMode[1] !== '');
       await loadPresetPatientList(isDetailMode);
       // URLとReduxストアを更新
       dispatch({
@@ -1456,6 +1495,13 @@ const Patients = () => {
   };
 
   const handleGotoPresetManager = () => {
+    // プラグイン登録と同様の権限チェック
+    const auth = localStorage.getItem('is_plugin_registerable');
+    if (auth !== 'true') {
+      // eslint-disable-next-line no-alert
+      alert('権限がありません');
+      return;
+    }
     navigate('/PatientListPresetManager');
   };
 
@@ -1747,11 +1793,12 @@ const Patients = () => {
           const caseIds = patientList.map((p) => p.case_id);
           const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds });
           
+          // ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示を試みる
+          const documentsMap = new Map();
           if (documentsResult.statusNum === RESULT.NORMAL_TERMINATION) {
             const casesData = documentsResult.body as any[];
             
             // case_idをキーにしたマップを作成
-            const documentsMap = new Map();
             for (const caseData of casesData) {
               const caseId = Number(caseData.jesgo_case.case_id);
               const documents = transformDocuments(caseData.jesgo_document || []);
@@ -1763,18 +1810,37 @@ const Patients = () => {
                 patient.date_of_death = caseData.jesgo_case.date_of_death;
               }
             }
-            
-            // 表示用データを作成
-            const formattedData = patientList.map((patient) => {
-              const documents = documentsMap.get(patient.case_id) || [];
-              const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo);
-              return row;
-            }).filter(row => row !== null);
-            
-            setPresetPatientData(formattedData);
           } else {
             console.error('loadPresetPatientList: ドキュメント取得失敗', { statusNum: documentsResult.statusNum, body: documentsResult.body });
+            // ドキュメント取得に失敗した場合でも、患者リストだけでも表示できるように空のマップを使用
           }
+          
+          // 表示用データを作成（ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示）
+          let formattedData = patientList.map((patient) => {
+            const documents = documentsMap.get(patient.case_id) || [];
+            const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo);
+            return row;
+          }).filter(row => row !== null);
+          
+          // カスタム項目のソート処理（フロントエンドで実装）
+          if (sortColumn && sortDirection && sortColumn.startsWith('custom_')) {
+            const fieldIdMatch = sortColumn.match(/^custom_(\d+)$/);
+            if (fieldIdMatch) {
+              const fieldId = parseInt(fieldIdMatch[1], 10);
+              const field = selectedPresetDetail.fields?.find((f: any) => f.field_id === fieldId);
+              
+              if (field) {
+                const isAscending = sortDirection === 'asc';
+                formattedData.sort((a, b) => {
+                  const valueA = a[field.field_name] ?? '';
+                  const valueB = b[field.field_name] ?? '';
+                  return compareValues(valueA, valueB, isAscending);
+                });
+              }
+            }
+          }
+          
+          setPresetPatientData(formattedData);
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
         }
@@ -1821,11 +1887,12 @@ const Patients = () => {
           const caseIds = patientList.map((p) => p.case_id);
           const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds });
           
+          // ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示を試みる
+          const documentsMap = new Map();
           if (documentsResult.statusNum === RESULT.NORMAL_TERMINATION) {
             const casesData = documentsResult.body as any[];
             
             // case_idをキーにしたマップを作成
-            const documentsMap = new Map();
             for (const caseData of casesData) {
               const caseId = Number(caseData.jesgo_case.case_id);
               const documents = transformDocuments(caseData.jesgo_document || []);
@@ -1837,16 +1904,37 @@ const Patients = () => {
                 patient.date_of_death = caseData.jesgo_case.date_of_death;
               }
             }
-            
-            // 表示用データを作成
-            const formattedData = patientList.map((patient) => {
-              const documents = documentsMap.get(patient.case_id) || [];
-              const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo);
-              return row;
-            }).filter(row => row !== null);
-            
-            setPresetPatientData(formattedData);
+          } else {
+            console.error('loadPresetPatientList: ドキュメント取得失敗', { statusNum: documentsResult.statusNum, body: documentsResult.body });
+            // ドキュメント取得に失敗した場合でも、患者リストだけでも表示できるように空のマップを使用
           }
+          
+          // 表示用データを作成（ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示）
+          let formattedData = patientList.map((patient) => {
+            const documents = documentsMap.get(patient.case_id) || [];
+            const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo);
+            return row;
+          }).filter(row => row !== null);
+          
+          // カスタム項目のソート処理（フロントエンドで実装）
+          if (sortColumn && sortDirection && sortColumn.startsWith('custom_')) {
+            const fieldIdMatch = sortColumn.match(/^custom_(\d+)$/);
+            if (fieldIdMatch) {
+              const fieldId = parseInt(fieldIdMatch[1], 10);
+              const field = selectedPresetDetail.fields?.find((f: any) => f.field_id === fieldId);
+              
+              if (field) {
+                const isAscending = sortDirection === 'asc';
+                formattedData.sort((a, b) => {
+                  const valueA = a[field.field_name] ?? '';
+                  const valueB = b[field.field_name] ?? '';
+                  return compareValues(valueA, valueB, isAscending);
+                });
+              }
+            }
+          }
+          
+          setPresetPatientData(formattedData);
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
         }
@@ -1945,6 +2033,7 @@ const Patients = () => {
                   title="プリセット選択"
                   onClick={handleGotoPresetManager}
                   bsStyle="info"
+                  disabled={!!(listMode[1] && listMode[1] !== '')}
                 >
                   <Glyphicon glyph="bookmark" />
                   プリセット
@@ -2343,7 +2432,7 @@ const Patients = () => {
                 sortColumn={sortColumn}
                 sortDirection={sortDirection}
                 onSortChange={(column, direction) => {
-                  setSortColumn(column as 'patientId' | 'patientName' | 'age' | 'startDate' | 'lastUpdate' | 'diagnosis' | 'advancedStage' | null);
+                  setSortColumn(column);
                   setSortDirection(direction);
                   setCurrentPage(1); // ソート変更時は1ページ目に戻る
                 }}

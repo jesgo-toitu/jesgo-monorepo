@@ -17,6 +17,8 @@ export const STATUS_STRINGS = {
   RECURRENCE: 'recurrence',
   /** エラー有無 */
   HAS_ERROR: 'has_error',
+  /** 警告有無 */
+  HAS_WARN: 'has_warn',
   /** 合併症 */
   COMPLICATIONS: 'complications',
   /** 登録拒否 */

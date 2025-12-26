@@ -14,9 +14,11 @@ interface PresetPatientRow {
 }
 
 interface PresetField {
+  field_id?: number;
   field_name: string;
   display_name: string;
   is_visible: boolean;
+  is_fixed?: boolean;
   display_order: number;
 }
 
@@ -38,7 +40,7 @@ type SortColumn = string | null;
 type SortDirection = 'asc' | 'desc' | null;
 
 // プリセットフィールド名をバックエンドのソートカラム名にマッピング
-const mapFieldNameToSortColumn = (fieldName: string): string | null => {
+const mapFieldNameToSortColumn = (fieldName: string, field?: PresetField): string | null => {
   // USER_DATA_PROPERTIES が undefined の場合は、直接文字列を使用
   const USER_DATA_PROPERTIES = CommonConstants.USER_DATA_PROPERTIES || {
     PATIENT_ID: 'patientId',
@@ -68,7 +70,18 @@ const mapFieldNameToSortColumn = (fieldName: string): string | null => {
     [FIXED_FIELD_NAMES.DIAGNOSIS]: USER_DATA_PROPERTIES.DIAGNOSIS,
     [FIXED_FIELD_NAMES.ADVANCED_STAGE]: USER_DATA_PROPERTIES.ADVANCED_STAGE,
   };
-  return mapping[fieldName] || null;
+  
+  // 固定項目の場合は既存のマッピングを使用
+  if (mapping[fieldName]) {
+    return mapping[fieldName];
+  }
+  
+  // カスタム項目の場合は field_id を使用
+  if (field && !field.is_fixed && field.field_id) {
+    return `custom_${field.field_id}`;
+  }
+  
+  return null;
 };
 
 const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
@@ -167,11 +180,11 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
   const displayData = patientData;
 
   // ヘッダークリック時のソート切り替え
-  const handleSort = (fieldName: string) => {
+  const handleSort = (field: PresetField) => {
     if (!onSortChange) return;
     
     // フィールド名をバックエンドのソートカラム名にマッピング
-    const sortColumn = mapFieldNameToSortColumn(fieldName);
+    const sortColumn = mapFieldNameToSortColumn(field.field_name, field);
     if (!sortColumn) {
       return;
     }
@@ -192,9 +205,9 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
   };
 
   // ソートアイコンの取得
-  const getSortIcon = (fieldName: string) => {
+  const getSortIcon = (field: PresetField) => {
     // フィールド名をバックエンドのソートカラム名にマッピング
-    const sortColumn = mapFieldNameToSortColumn(fieldName);
+    const sortColumn = mapFieldNameToSortColumn(field.field_name, field);
     if (!sortColumn) {
       return null; // ソート対象外のフィールドはアイコンを表示しない
     }
@@ -242,16 +255,16 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                   <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
                     <div 
                       style={{ cursor: 'pointer', userSelect: 'none' }}
-                      onClick={() => handleSort(field.field_name)}
+                      onClick={() => handleSort(field)}
                     >
-                      {field.display_name}{getSortIcon(field.field_name)}
+                      {field.display_name}{getSortIcon(field)}
                     </div>
                     <div style={{ borderTop: '1px solid #333', margin: '2px 0', width: '100%' }}></div>
                     <div 
                       style={{ cursor: 'pointer', userSelect: 'none' }}
-                      onClick={() => handleSort(pairedField.field_name)}
+                      onClick={() => handleSort(pairedField)}
                     >
-                      {pairedField.display_name}{getSortIcon(pairedField.field_name)}
+                      {pairedField.display_name}{getSortIcon(pairedField)}
                     </div>
                   </div>
                 </th>
@@ -263,9 +276,9 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
               <th 
                 key={`${field.field_name}-${columnIndex}`} 
                 style={{ textAlign: 'left', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => handleSort(field.field_name)}
+                onClick={() => handleSort(field)}
               >
-                {field.display_name}{getSortIcon(field.field_name)}
+                {field.display_name}{getSortIcon(field)}
               </th>
             );
           })}

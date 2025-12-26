@@ -4,6 +4,7 @@
   "description": "JESGO共通ライブラリ - Frontend/Backend共通の型定義・ユーティリティを提供",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [ "dist", "package.json", "README.md" ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
@@ -20,4 +21,3 @@
   "peerDependencies": {},
   "dependencies": {}
 }
-

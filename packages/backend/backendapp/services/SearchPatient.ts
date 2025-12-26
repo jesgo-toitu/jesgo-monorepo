@@ -682,8 +682,10 @@ export const searchPatients = async (
     if (document.includes('jesgo:error')) {
       const errorProperty = (dbRow.document as any)['jesgo:error'];
       if (Array.isArray(errorProperty) && errorProperty.filter(item => item != null).length > 0) {
-        // エラー項目がある場合はhas_errorを追加
-        userData.registration.push(STATUS_STRINGS.HAS_ERROR);
+        if (errorProperty.some(item => (item as string).includes('要確認')))
+          userData.registration.push(STATUS_STRINGS.HAS_WARN);
+        if (errorProperty.some(item => (item as string).includes('要修正')))
+          userData.registration.push(STATUS_STRINGS.HAS_ERROR); 
       }
     } 
 
@@ -788,16 +790,23 @@ export const searchPatients = async (
 
     // 登録
     if (userData.registration.length > 0) {
+      let hasWarn = false;
       let hasError = false;
-      // has_errorがある場合は一旦退避
-      if (userData.registration.indexOf(STATUS_STRINGS.HAS_ERROR) !== -1) {
-        hasError = true;
-        userData.registration = userData.registration.filter(
-          (p) => p !== STATUS_STRINGS.HAS_ERROR
-        );
-      }
+      // has_warn、has_erorの退避
+      userData.registration = userData.registration.filter(r => {
+        switch (r) {
+          case STATUS_STRINGS.HAS_WARN: {
+            hasWarn = true;
+            return false;
+          }
+          case STATUS_STRINGS.HAS_ERROR: {
+            hasError = true;
+            return false;
+          }
+        }
+        return true;
+      })
 
-      // has_errorを削除しても配列に要素があるかを確認
       if (userData.registration.length > 0) {
         // 1つ以上の値がある場合は、「拒否」、「未」、「済」の優先順で一番優先された物を値とする
         const orderRule: string[] = [STATUS_STRINGS.DECLINE, STATUS_STRINGS.NOT_COMPLETED, STATUS_STRINGS.COMPLETED];
@@ -808,10 +817,9 @@ export const searchPatients = async (
         ];
       }
 
-      // もともとhas_errorがあった場合は配列に再追加する
-      if (hasError) {
-        userData.registration.push(STATUS_STRINGS.HAS_ERROR);
-      }
+      // has_warn、has_erorの復元
+      if (hasWarn) userData.registration.push(STATUS_STRINGS.HAS_WARN);
+      if (hasError) userData.registration.push(STATUS_STRINGS.HAS_ERROR);
     }
     // 値がない場合は何も表示しない
 
@@ -1639,45 +1647,62 @@ export const searchPatients = async (
     const sortColumn = query.sortColumn;
     const sortDirection = query.sortDirection === 'asc';
     
-    userDataList.sort((a, b) => {
-      let valueA: unknown;
-      let valueB: unknown;
+    // カスタム項目のソートかどうかを判定（custom_${field_id}形式）
+    const customFieldMatch = sortColumn.match(/^custom_(\d+)$/);
+    
+    if (customFieldMatch) {
+      // カスタム項目のソート
+      const fieldId = parseInt(customFieldMatch[1], 10);
+      
+      // プリセット項目の情報を取得（presetFiltersから取得、またはpresetIdから取得）
+      // 注意: 現時点ではpresetFiltersにfield_idの情報が含まれていない可能性があるため、
+      // フロントエンドでソートする方が実装が簡単
+      // ここでは、カスタム項目のソートはフロントエンドで行うことを前提とする
+      // バックエンドでのソートは、プリセット項目の情報が必要なため、実装が複雑になる
+      logging(LOGTYPE.DEBUG, `カスタム項目のソートが要求されましたが、バックエンドでのソートは未実装です。field_id: ${fieldId}`, 'SearchPatient-searchPatients');
+      // カスタム項目のソートはフロントエンドで行うため、ここでは何もしない
+    } else {
+      // 固定項目のソート
+      userDataList.sort((a, b) => {
+        let valueA: unknown;
+        let valueB: unknown;
 
-      switch (sortColumn) {
-        case USER_DATA_PROPERTIES.PATIENT_ID:
-          valueA = a.patientId;
-          valueB = b.patientId;
-          break;
-        case USER_DATA_PROPERTIES.PATIENT_NAME:
-          valueA = a.patientName;
-          valueB = b.patientName;
-          break;
-        case USER_DATA_PROPERTIES.AGE:
-          valueA = a.age;
-          valueB = b.age;
-          break;
-        case USER_DATA_PROPERTIES.START_DATE:
-          valueA = a.startDate;
-          valueB = b.startDate;
-          break;
-        case USER_DATA_PROPERTIES.LAST_UPDATE:
-          valueA = a.lastUpdate;
-          valueB = b.lastUpdate;
-          break;
-        case USER_DATA_PROPERTIES.DIAGNOSIS:
-          valueA = a.diagnosis === DISPLAY_STRINGS.NOT_ENTERED ? '' : a.diagnosis;
-          valueB = b.diagnosis === DISPLAY_STRINGS.NOT_ENTERED ? '' : b.diagnosis;
-          break;
-        case USER_DATA_PROPERTIES.ADVANCED_STAGE:
-          valueA = a.advancedStage === DISPLAY_STRINGS.NOT_ENTERED ? '' : a.advancedStage;
-          valueB = b.advancedStage === DISPLAY_STRINGS.NOT_ENTERED ? '' : b.advancedStage;
-          break;
-        default:
-          return 0;
-      }
+        switch (sortColumn) {
+          case USER_DATA_PROPERTIES.PATIENT_ID:
+            valueA = a.patientId;
+            valueB = b.patientId;
+            break;
+          case USER_DATA_PROPERTIES.PATIENT_NAME:
+            valueA = a.patientName;
+            valueB = b.patientName;
+            break;
+          case USER_DATA_PROPERTIES.AGE:
+            valueA = a.age;
+            valueB = b.age;
+            break;
+          case USER_DATA_PROPERTIES.START_DATE:
+            valueA = a.startDate;
+            valueB = b.startDate;
+            break;
+          case USER_DATA_PROPERTIES.LAST_UPDATE:
+            valueA = a.lastUpdate;
+            valueB = b.lastUpdate;
+            break;
+          case USER_DATA_PROPERTIES.DIAGNOSIS:
+            valueA = a.diagnosis === DISPLAY_STRINGS.NOT_ENTERED ? '' : a.diagnosis;
+            valueB = b.diagnosis === DISPLAY_STRINGS.NOT_ENTERED ? '' : b.diagnosis;
+            break;
+          case USER_DATA_PROPERTIES.ADVANCED_STAGE:
+            valueA = a.advancedStage === DISPLAY_STRINGS.NOT_ENTERED ? '' : a.advancedStage;
+            valueB = b.advancedStage === DISPLAY_STRINGS.NOT_ENTERED ? '' : b.advancedStage;
+            break;
+          default:
+            return 0;
+        }
 
-      return compareValues(valueA, valueB, sortDirection);
-    });
+        return compareValues(valueA, valueB, sortDirection);
+      });
+    }
   }
 
   // ページング処理

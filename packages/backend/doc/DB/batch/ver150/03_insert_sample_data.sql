@@ -5,6 +5,9 @@
 -- 説明: プリセット管理のサンプルデータを挿入
 -- =============================================
 
+-- クライアントエンコーディングをUTF-8に設定
+SET client_encoding = 'UTF8';
+
 -- デフォルトプリセットの作成
 INSERT INTO jesgo_preset (preset_name, preset_description, created_by) VALUES 
 ('デフォルトプリセット', 'システム標準のプリセット', 'system');
@@ -32,13 +35,13 @@ INSERT INTO jesgo_preset_fixed_field (preset_id, fixed_field_id, display_order, 
 (1, 8, 8, 'last_update_date', TRUE, TRUE);  -- 最終更新日
 
 -- デフォルトプリセットの固定項目をプリセット項目テーブルにも挿入（後方互換性のため）
-INSERT INTO jesgo_preset_field (preset_id, field_name, display_name, field_type, is_visible, is_csv_export, schema_title, schema_version, is_fixed, display_order) VALUES 
-(1, '患者ID', '患者ID', 'string', TRUE, TRUE, '-', '-', TRUE, 1),
-(1, '患者名', '患者名', 'string', TRUE, TRUE, '-', '-', TRUE, 2),
-(1, '年齢', '年齢', 'number', TRUE, TRUE, '-', '-', TRUE, 3),
-(1, '初回治療開始日', '初回治療開始日', 'date', TRUE, TRUE, '-', '-', TRUE, 4),
-(1, '診断', '診断', 'string', TRUE, TRUE, '-', '-', TRUE, 5),
-(1, '進行期', '進行期', 'string', TRUE, TRUE, '-', '-', TRUE, 6),
-(1, 'ステータス', 'ステータス', 'status', TRUE, TRUE, '-', '-', TRUE, 7),
-(1, '最終更新日', '最終更新日', 'date', TRUE, TRUE, '-', '-', TRUE, 8);
+INSERT INTO jesgo_preset_field (preset_id, field_name, display_name, field_type, is_visible, is_csv_export, is_csv_header_display_name, schema_title, schema_version, is_fixed, display_order) VALUES 
+(1, '患者ID', '患者ID', 'string', TRUE, TRUE, FALSE, '-', '-', TRUE, 1),
+(1, '患者名', '患者名', 'string', TRUE, TRUE, FALSE, '-', '-', TRUE, 2),
+(1, '年齢', '年齢', 'number', TRUE, TRUE, FALSE, '-', '-', TRUE, 3),
+(1, '初回治療開始日', '初回治療開始日', 'date', TRUE, TRUE, FALSE, '-', '-', TRUE, 4),
+(1, '診断', '診断', 'string', TRUE, TRUE, FALSE, '-', '-', TRUE, 5),
+(1, '進行期', '進行期', 'string', TRUE, TRUE, FALSE, '-', '-', TRUE, 6),
+(1, 'ステータス', 'ステータス', 'status', TRUE, TRUE, FALSE, '-', '-', TRUE, 7),
+(1, '最終更新日', '最終更新日', 'date', TRUE, TRUE, FALSE, '-', '-', TRUE, 8);
 
