@@ -12,7 +12,7 @@
   "scripts": {
     "start": "cmd /c \"if defined PATH_NODE (\"\"%PATH_NODE%\"\" start.js) else (node start.js)\"",
     "build": "webpack --progress --mode development",
-    "dev-start": "webpack serve --mode development --port 3030 --host 0.0.0.0",
+    "dev-start": "webpack serve --mode development --port 3000 --host 0.0.0.0",
     "release-build": "webpack --progress --mode production",
     "postinstall": "patch-package",
     "lint": "eslint --ext .jsx,.js,.tsx,.ts src/",
