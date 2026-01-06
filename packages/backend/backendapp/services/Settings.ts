@@ -11,6 +11,7 @@ export type settings = {
   facility_name: string;
   jsog_registration_number: string;
   joed_registration_number: string;
+  default_page_size: number;
 };
 
 /**
@@ -31,6 +32,7 @@ export const getSettings = async (): Promise<ApiReturnObject> => {
     value->'setting'->'hisid'->>'hyphen_enable' as hisid_hyphen_enable, 
     value->'setting'->'hisid'->>'alphabet_enable' as hisid_alphabet_enable, 
     value->'setting'->'display'->>'jesgo_required_highlight' as jesgo_required_highlight, 
+    value->'setting'->'display'->>'default_page_size' as default_page_size, 
     value->'setting'->'facility_information'->>'name' as facility_name, 
     value->'setting'->'facility_information'->>'jsog_registration_number' as jsog_registration_number, 
     value->'setting'->'facility_information'->>'joed_registration_number' as joed_registration_number 
@@ -71,6 +73,7 @@ export const updateSettings = async (
         },
         display: {
           jesgo_required_highlight: settingsData.jesgo_required_highlight,
+          default_page_size: settingsData.default_page_size,
         },
         facility_information: {
           name: settingsData.facility_name,

@@ -48,6 +48,7 @@ export interface PresetFieldData {
   field_type?: string;
   is_visible: boolean;
   is_csv_export: boolean;
+  is_csv_header_display_name?: boolean;
   is_fixed: boolean;
   display_order: number;
   schema_title?: string;
@@ -263,6 +264,7 @@ const fieldsQuery = `
         pf.field_type,
         pf.is_visible,
         pf.is_csv_export,
+        pf.is_csv_header_display_name,
         pf.is_fixed,
         pf.display_order,
         pf.schema_title,
@@ -495,9 +497,9 @@ export const savePreset = async (presetData: PresetDetailData, req: any): Promis
         INSERT INTO jesgo_preset_field (
           preset_id, schema_primary_id, schema_id, schema_id_string,
           field_name, display_name, field_path, field_type, is_visible, is_csv_export,
-          is_fixed, display_order, schema_title, schema_version,
+          is_csv_header_display_name, is_fixed, display_order, schema_title, schema_version,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `;
       
       // 固定項目の場合はスキーマ関連情報を登録しない
@@ -508,6 +510,7 @@ export const savePreset = async (presetData: PresetDetailData, req: any): Promis
       const fieldType = field.field_type || null;
       const schemaTitle = field.is_fixed ? null : (field.schema_title || null);
       const schemaVersion = field.is_fixed ? null : (field.schema_version || null);
+      const isCsvHeaderDisplayName = field.is_csv_header_display_name !== undefined ? field.is_csv_header_display_name : false;
       
       await dbAccess.query(fieldQuery, [
         presetId,
@@ -520,6 +523,7 @@ export const savePreset = async (presetData: PresetDetailData, req: any): Promis
         fieldType,
         field.is_visible,
         field.is_csv_export,
+        isCsvHeaderDisplayName,
         field.is_fixed,
         field.display_order,
         schemaTitle,

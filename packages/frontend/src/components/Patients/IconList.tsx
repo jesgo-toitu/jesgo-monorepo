@@ -14,6 +14,7 @@ const makeIconList = (props: { iconList: string[], displayCaption: string, displ
     surgery: '手',
     supportivecare: '緩和',
     has_error: 'エラーあり',
+    has_warn: '警告あり'
   };
   const { iconList, displayCaption, displayText } = props;
   const orderRule = [
@@ -27,7 +28,8 @@ const makeIconList = (props: { iconList: string[], displayCaption: string, displ
     'death',
     'not_completed',
     'completed',
-    'has_error',
+    'has_warn',
+    'has_error'
   ];
 
   return (

@@ -5,7 +5,7 @@ import { ApiReturnObject, RESULT, METHOD_TYPE, WebAppConfig } from '@jesgo/commo
 // 共通パッケージからの再エクスポート
 export { ApiReturnObject, RESULT, METHOD_TYPE };
 
-const CONFIG_PATH = './config.json' as string;
+const CONFIG_PATH = '/config.json' as string;
 
 // デフォルト設定
 const DEFAULT_CONFIG: WebAppConfig = {

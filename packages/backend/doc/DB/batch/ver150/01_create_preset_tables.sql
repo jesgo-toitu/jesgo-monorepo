@@ -40,6 +40,7 @@ CREATE TABLE jesgo_preset_field (
     -- 表示制御
     is_visible BOOLEAN DEFAULT TRUE,                 -- 表示フラグ（一覧表示するか）
     is_csv_export BOOLEAN DEFAULT TRUE,              -- CSV出力フラグ（CSVに含めるか）
+    is_csv_header_display_name BOOLEAN DEFAULT FALSE, -- CSVヘッダを表示名にするフラグ
     is_fixed BOOLEAN DEFAULT FALSE,                  -- 固定項目フラグ（編集不可か）
     display_order INTEGER DEFAULT 0,                -- 表示順序（一覧表示の順番）
     
@@ -93,6 +94,7 @@ COMMENT ON COLUMN jesgo_preset_field.field_path IS 'フィールドパス（例�
 COMMENT ON COLUMN jesgo_preset_field.field_type IS '項目タイプ（例：patient_id, patient_name）';
 COMMENT ON COLUMN jesgo_preset_field.is_visible IS '表示フラグ（一覧画面で表示するか）';
 COMMENT ON COLUMN jesgo_preset_field.is_csv_export IS 'CSV出力フラグ（CSVエクスポートに含めるか）';
+COMMENT ON COLUMN jesgo_preset_field.is_csv_header_display_name IS 'CSVヘッダを表示名にするフラグ（TRUEの場合、CSVヘッダにdisplay_nameを使用）';
 COMMENT ON COLUMN jesgo_preset_field.is_fixed IS '固定項目フラグ（編集不可の固定項目か）';
 COMMENT ON COLUMN jesgo_preset_field.display_order IS '表示順序（一覧表示の順番）';
 COMMENT ON COLUMN jesgo_preset_field.schema_title IS '文書(スキーマ)タイトル（例：患者台帳 子宮頸がん）';
@@ -169,6 +171,7 @@ SELECT
     -- 表示制御
     pf.is_visible,
     pf.is_csv_export,
+    pf.is_csv_header_display_name,
     pf.is_fixed,
     pf.display_order,
     
