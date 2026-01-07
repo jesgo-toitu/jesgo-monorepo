@@ -8,7 +8,6 @@ import {
   Radio,
   Table,
   Checkbox,
-  FormControl,
 } from 'react-bootstrap';
 import './Settings.css';
 import apiAccess, { METHOD_TYPE, RESULT } from '../common/ApiAccess';
@@ -28,7 +27,6 @@ export type settingsFromApi = {
   facility_name: string;
   jsog_registration_number: string;
   joed_registration_number: string;
-  default_page_size: string;
 };
 
 type settings = {
@@ -41,7 +39,6 @@ type settings = {
   facility_name: string;
   jsog_registration_number: string;
   joed_registration_number: string;
-  default_page_size: number;
 };
 
 const Settings = () => {
@@ -62,7 +59,6 @@ const Settings = () => {
     facility_name: '',
     jsog_registration_number: '',
     joed_registration_number: '',
-    default_page_size: 100,
   });
   const [loadedSettingJson, setLoadedSettingJson] =
     useState<settings>(settingJson);
@@ -89,10 +85,6 @@ const Settings = () => {
         const hisidDigit = Number(returned.hisid_digit);
         const validHisidDigit = isNaN(hisidDigit) || hisidDigit < 6 || hisidDigit > 12 ? 8 : hisidDigit;
         
-        // default_page_sizeの数値変換（無効な値の場合はデフォルト値25を使用）
-        const pageSize = Number(returned.default_page_size);
-        const validPageSize = isNaN(pageSize) || ![10, 25, 50, 100].includes(pageSize) ? 100 : pageSize;
-        
         const setting: settings = {
           hisid_alignment: returned.hisid_alignment === 'true',
           hisid_digit: validHisidDigit,
@@ -103,7 +95,6 @@ const Settings = () => {
           facility_name: returned.facility_name,
           jsog_registration_number: returned.jsog_registration_number,
           joed_registration_number: returned.joed_registration_number,
-          default_page_size: validPageSize,
         };
         setFacilityName(returned.facility_name);
         setSettingJson(setting);
@@ -219,13 +210,6 @@ const Settings = () => {
         });
         break;
 
-      case 'default_page_size':
-        setSettingJson({
-          ...settingJson,
-          default_page_size: Number(eventTarget.value),
-        });
-        break;
-
       default:
     }
   };
@@ -332,14 +316,6 @@ const Settings = () => {
         'jesgo_required_highlight',
         JSON.stringify(settingJson.jesgo_required_highlight)
       );
-      localStorage.setItem(
-        'default_page_size',
-        settingJson.default_page_size.toString()
-      );
-      // カスタムイベントを発火して、Patients画面に設定変更を通知
-      window.dispatchEvent(new CustomEvent('settingsUpdated', {
-        detail: { default_page_size: settingJson.default_page_size }
-      }));
       // eslint-disable-next-line no-alert
       alert('設定が完了しました');
       backToPatientsList(navigate);
@@ -566,23 +542,6 @@ const Settings = () => {
                     onChange={handleSettingInputs}
                     value={settingJson.joed_registration_number}
                   />
-                </td>
-              </tr>
-              <tr>
-                <td>デフォルト表示件数</td>
-                <td>
-                  <FormControl
-                    componentClass="select"
-                    name="default_page_size"
-                    value={settingJson.default_page_size}
-                    onChange={handleSettingInputs}
-                    style={{ width: '100px' }}
-                  >
-                    <option value="10">10件</option>
-                    <option value="25">25件</option>
-                    <option value="50">50件</option>
-                    <option value="100">100件</option>
-                  </FormControl>
                 </td>
               </tr>
             </tbody>

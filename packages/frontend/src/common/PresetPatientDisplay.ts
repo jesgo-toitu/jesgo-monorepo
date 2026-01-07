@@ -25,7 +25,6 @@ export interface PresetField {
   field_type?: string;
   is_visible: boolean;
   is_csv_export: boolean;
-  is_csv_header_display_name?: boolean;
   is_fixed: boolean;
   display_order: number;
   schema_title?: string;

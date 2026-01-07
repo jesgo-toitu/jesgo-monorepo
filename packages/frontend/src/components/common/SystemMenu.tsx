@@ -85,8 +85,8 @@ export const SystemMenu = (props: {
 
   const handlPresetManager = () => {
     if (isConfirm === null || isConfirm()) {
-      // プラグイン登録と同様の権限設定
-      checkAuth('is_plugin_registerable', '/PresetManager');
+      // 一般ユーザ・上級ユーザ・システムオペレータが表示可能
+      checkAuthOr(['is_view_roll', 'is_system_manage_roll'], '/PresetManager');
     }
   };
 

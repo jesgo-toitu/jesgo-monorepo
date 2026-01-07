@@ -34,8 +34,7 @@
     "release:build": "npm run build --workspaces && npm run release:package",
     "release:package": "node scripts/package-release.js",
     "generate:keys": "bash scripts/generate-keys.sh",
-    "generate:keys:windows": "scripts\\generate-keys.bat",
-    "export": "export\\ExportProduction.bat"
+    "generate:keys:windows": "scripts\\generate-keys.bat"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
