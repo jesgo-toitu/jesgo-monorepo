@@ -228,52 +228,6 @@ const PresetManager = () => {
     }
   };
 
-  // プリセットの複製
-  const duplicatePreset = async (preset: PresetItem) => {
-    setIsLoading(true);
-    
-    try {
-      // プリセット詳細を取得
-      const result = await apiAccess(METHOD_TYPE.GET, `/preset-detail/${preset.preset_id}`);
-      
-      if (result.statusNum === RESULT.NORMAL_TERMINATION) {
-        const presetDetail = result.body as any;
-        
-        // 複製用にpreset_idを削除し、プリセット名に「のコピー」を追加
-        const duplicatedFields = (presetDetail.fields || []).map((field: PresetItemField) => {
-          // field_idとpreset_idを削除して新規作成として扱う
-          const { field_id, preset_id, ...restField } = field;
-          return restField;
-        });
-        
-        setEditingPreset({
-          // preset_idを削除して新規作成として扱う
-          preset_id: 0,
-          preset_name: `${presetDetail.preset_name}のコピー`,
-          preset_description: presetDetail.preset_description || '',
-          created_by: '',
-          created_at: '',
-          updated_by: undefined,
-          updated_at: '',
-          is_active: true,
-          field_count: duplicatedFields.length,
-          visible_field_count: duplicatedFields.filter((f: PresetItemField) => f.is_visible).length,
-          csv_export_count: duplicatedFields.filter((f: PresetItemField) => f.is_csv_export).length,
-          fields: duplicatedFields,
-          fixed_fields: presetDetail.fixed_fields || []
-        });
-        setShowEditModal(true);
-      } else {
-        alert(`プリセット詳細の取得に失敗しました: ${result.body}`);
-      }
-    } catch (error) {
-      console.error('プリセット詳細取得エラー:', error);
-      alert('プリセット詳細の取得中にエラーが発生しました');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // モーダルの保存成功処理
   const handleModalSaveSuccess = () => {
     // 一覧を再読み込み
@@ -390,12 +344,6 @@ const PresetManager = () => {
                             disabled={isSystemPreset}
                           >
                             <Glyphicon glyph="edit" />
-                          </Button>
-                          <Button
-                            title="コピー"
-                            onClick={() => duplicatePreset(preset)}
-                          >
-                            <Glyphicon glyph="copy" />
                           </Button>
                           <Button
                             title={isSystemPreset ? 'システムプリセットは削除できません' : '削除'}

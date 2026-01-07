@@ -447,11 +447,12 @@ type initValueInfo = {
 
 /**
  * プラグインのinitを実行し、得られた情報を返す
+ * @param requireEsm
  * @param filePath
  * @returns
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const initJs = async (filePath: string) => {
+const initJs = async (requireEsm: any, filePath: string) => {
   const retValue: initValueInfo = { path: filePath };
 
   try {
@@ -461,12 +462,10 @@ const initJs = async (filePath: string) => {
     );
     parse(scriptText, { ecmaVersion: 2022, sourceType: 'module' });
 
-    const Module = require('module') as any;
-    const ModuleInstance = new Module(filePath, module);
-    ModuleInstance.filename = pathModule.join(process.cwd(), filePath);
-    ModuleInstance.paths = Module._nodeModulePaths(pathModule.dirname(ModuleInstance.filename));
-    ModuleInstance._compile(scriptText, ModuleInstance.filename);
-    const loadModule: IPluginModule = ModuleInstance.exports;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+    const loadModule: IPluginModule = await requireEsm(
+      pathModule.join(process.cwd(), filePath)
+    );
 
     // init関数のチェック、内容取得
     if (loadModule.init) {
@@ -596,7 +595,7 @@ const getInitValues = async (
   errorMessages: string[]
 ) => {
   logging(LOGTYPE.DEBUG, `呼び出し`, 'Plugin', 'getInitValues');
-  console.log('** getInitValues called');
+
   const retValue: jesgoPluginColumns[] = [];
 
   // jsファイルで抽出
@@ -626,9 +625,11 @@ const getInitValues = async (
     });
 
   try {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-var-requires
+    const requireEsm = require('esm')(module);
     // jsファイルのinitから情報取得
     const initValList = await Promise.all(
-      jsFileNames.map(async (path) => await initJs(path))
+      jsFileNames.map(async (path) => await initJs(requireEsm, path))
     );
 
     for (const info of initValList) {
@@ -700,7 +701,6 @@ const getInitValues = async (
 
     return retValue;
   } catch (err) {
-    console.error(err);
     throw err as Error;
   }
 };
@@ -792,7 +792,6 @@ export const uploadPluginZipFile = async (
   userId: number | undefined
 ): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Plugin', 'uploadPluginZipFile');
-  console.log('** uploadPluginZipFile called');  
   // eslint-disable-next-line
   const filePath: string = data.path;
   const errorMessages: string[] = [];

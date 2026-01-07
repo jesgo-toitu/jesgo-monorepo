@@ -11,18 +11,12 @@ const app = express();
 // ポート情報の設定
 const port = configValues.default.webAppPort || process.env.JESGO_WEBAPP_PORT || 3030;
 
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static("../config"));
+}
+
 app.use(express.static("dist"));
 app.use('/image', express.static('image'));
-
-router.get("/config.json", (req, res) => {
-  res.json({
-    webApp: {
-      webAppPort: configValues.default.webAppPort,
-      endPointUrl: configValues.default.endPointUrl,
-      defaultPageSize: configValues.default.defaultPageSize
-    }
-  });
-});
 
 router.get("*", (req, res, next) => {
   // console.log(`req.path：${req.path}`);

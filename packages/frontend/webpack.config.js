@@ -135,15 +135,6 @@ module.exports = {
       logging: 'warn',
       reconnect: true,
     },
-    setupMiddlewares: (middlewares, devServer) => {
-      // packages/settings/config.jsonを/config.jsonとして公開
-      devServer.app.get('/config.json', (req, res) => {
-        res.sendFile(
-          path.join(__dirname, '../settings/config.template.json')
-        );
-      });
-      return middlewares;
-    },
     static: [
       {
         directory: path.join(__dirname, 'dist'),
@@ -155,7 +146,14 @@ module.exports = {
       {
         directory: path.join(__dirname, 'assets'),
         publicPath: '/assets',
-      }
+      },
+      {
+        // packages/settings/config.jsonを/config.jsonとして公開
+        directory: path.join(__dirname, '../settings'),
+        publicPath: '/',
+        serveIndex: false,
+        watch: true,
+      },
     ],
   }
 };

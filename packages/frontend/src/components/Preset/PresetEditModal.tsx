@@ -43,7 +43,6 @@ interface PresetItemField {
   field_type?: string;
   is_visible: boolean;
   is_csv_export: boolean;
-  is_csv_header_display_name?: boolean;
   is_fixed: boolean;
   display_order: number;
   schema_title?: string; // 文書(スキーマ)タイトル
@@ -252,12 +251,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
       
       // 既存の項目（データベースから取得）を優先して使用
       // 既存項目が空の場合は、固定項目を使用
-      const mergedFields = existingFields.length > 0 
-        ? existingFields.map(field => ({
-            ...field,
-            is_csv_header_display_name: field.is_csv_header_display_name !== undefined ? field.is_csv_header_display_name : false
-          }))
-        : [...fixedFields];
+      const mergedFields = existingFields.length > 0 ? [...existingFields] : [...fixedFields];
       setFields(mergedFields);
     } else {
       // 新規作成の場合
@@ -389,7 +383,6 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
       display_name: '',
       is_visible: true,
       is_csv_export: true,
-      is_csv_header_display_name: false,
       is_fixed: false,
       display_order: fields.length + 1,
     };
@@ -404,23 +397,10 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
   };
 
   // フィールドの更新
-  const updateField = (fieldId: number | undefined, fieldName: string | undefined, updates: Partial<PresetItemField>) => {
-    if (fieldId === undefined && fieldName === undefined) {
-      console.error('updateField: both fieldId and fieldName are undefined', { fieldId, fieldName, updates, fields });
-      return;
-    }
-    console.log('updateField called', { fieldId, fieldName, updates, currentFields: fields.map(f => ({ field_id: f.field_id, field_name: f.field_name, is_visible: f.is_visible, is_csv_export: f.is_csv_export })) });
-    const updatedFields = fields.map(field => {
-      // field_idが一致する場合、またはfield_idがundefinedでfield_nameが一致する場合に更新
-      const matches = (fieldId !== undefined && field.field_id === fieldId) || 
-                      (fieldName !== undefined && field.field_name === fieldName && (fieldId === undefined || field.field_id === fieldId));
-      if (matches) {
-        console.log('Updating field', { field_id: field.field_id, field_name: field.field_name, updates });
-        return { ...field, ...updates };
-      }
-      return field;
-    });
-    console.log('Updated fields', updatedFields.map(f => ({ field_id: f.field_id, field_name: f.field_name, is_visible: f.is_visible, is_csv_export: f.is_csv_export })));
+  const updateField = (fieldId: number | undefined, updates: Partial<PresetItemField>) => {
+    const updatedFields = fields.map(field =>
+      field.field_id === fieldId ? { ...field, ...updates } : field
+    );
     setFields(updatedFields);
   };
 
@@ -642,11 +622,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
         fieldType = 'date';
       }
       
-      const fieldIdToUpdate = parseInt(selectingFieldId, 10);
-      const fieldToUpdate = fields.find(f => f.field_id === fieldIdToUpdate);
-      const existingFieldName = fieldToUpdate?.field_name || displayFieldName;
-      
-      updateField(fieldIdToUpdate, existingFieldName, { 
+      updateField(parseInt(selectingFieldId, 10), { 
         field_name: displayFieldName,
         display_name: displayFieldName,
         field_path: fieldPath, // フルパスを保存
@@ -813,7 +789,6 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
         schema_version: `${selectedSchemaInfo.version_major}.${selectedSchemaInfo.version_minor}`,
         is_visible: true,
         is_csv_export: true,
-        is_csv_header_display_name: false,
         is_fixed: false,
         display_order: fields.length + addedCount + 1,
       };
@@ -895,7 +870,6 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
           field_type: field.field_type,
           is_visible: field.is_visible,
           is_csv_export: field.is_csv_export,
-          is_csv_header_display_name: field.is_csv_header_display_name !== undefined ? field.is_csv_header_display_name : false,
           is_fixed: field.is_fixed,
           display_order: field.display_order || index + 1,
           schema_title: field.schema_title,
@@ -1001,8 +975,8 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                 <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f5f5f5', zIndex: 1 }}>
                   <tr>
                     <th style={{ width: '60px', whiteSpace: 'nowrap' }}>No</th>
+                    <th style={{ width: '390px', whiteSpace: 'nowrap' }}>項目</th>
                     <th style={{ width: '390px', whiteSpace: 'nowrap' }}>表示名</th>
-                    <th style={{ width: '390px', whiteSpace: 'nowrap' }}>パス</th>
                     <th style={{ width: '150px', whiteSpace: 'nowrap' }}>文書(スキーマ)タイトル</th>
                     <th style={{ width: '80px', whiteSpace: 'nowrap' }}>バージョン</th>
                     <th style={{ width: '60px', whiteSpace: 'nowrap', textAlign: 'center' }}>
@@ -1029,16 +1003,6 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                           }}
                           style={{ cursor: 'pointer' }}
                         />
-                      </div>
-                    </th>
-                    <th style={{ width: '120px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '12px' }}>CSVヘッダ</span>
-                      </div>
-                    </th>
-                    <th style={{ width: '60px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '12px' }}>削除</span>
                       </div>
                     </th>
                   </tr>
@@ -1097,16 +1061,6 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                         </div>
                       </td>
                       <td style={{ width: '390px' }}>
-                        <FormControl
-                          type="text"
-                          placeholder="表示名を入力"
-                          value={field.display_name}
-                          onChange={(e) => updateField(field.field_id, field.field_name, { display_name: (e.target as HTMLInputElement).value })}
-                          style={{ width: '100%' }}
-                          disabled={field.is_fixed}
-                        />
-                      </td>
-                      <td style={{ width: '390px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                           <span style={{ 
                             flex: 1, 
@@ -1120,11 +1074,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                             display: 'flex',
                             alignItems: 'center'
                           }}>
-                            {field.field_name 
-                              ? (field.schema_title && field.schema_title !== '-' 
-                                  ? `${field.schema_title}.${field.field_name}` 
-                                  : field.field_name)
-                              : 'パス名を選択'}
+                            {field.field_name || '項目名を選択'}
                           </span>
                           {!field.is_fixed && (
                             <Button
@@ -1137,6 +1087,16 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                             </Button>
                           )}
                         </div>
+                      </td>
+                      <td style={{ width: '390px' }}>
+                        <FormControl
+                          type="text"
+                          placeholder="表示名を入力"
+                          value={field.display_name}
+                          onChange={(e) => updateField(field.field_id, { display_name: (e.target as HTMLInputElement).value })}
+                          style={{ width: '100%' }}
+                          disabled={field.is_fixed}
+                        />
                       </td>
                       <td style={{ width: '150px', textAlign: 'center', verticalAlign: 'middle', backgroundColor: '#f9f9f9' }}>
                         <span style={{ fontSize: '12px', color: '#666' }}>
@@ -1151,11 +1111,9 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                       <td style={{ width: '60px', textAlign: 'center' }}>
                         <input
                           type="checkbox"
-                          id={`is_visible_${field.field_id || index}_${field.field_name}`}
                           checked={field.is_visible}
                           onChange={(e) => {
-                            console.log('is_visible checkbox changed', { field_id: field.field_id, field_name: field.field_name, checked: e.target.checked, index });
-                            updateField(field.field_id, field.field_name, { is_visible: e.target.checked });
+                            updateField(field.field_id, { is_visible: e.target.checked });
                           }}
                           disabled={field.is_fixed && (field.field_name === '患者ID' || field.field_name === '患者名' || field.field_name === '年齢')}
                         />
@@ -1163,48 +1121,12 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                       <td style={{ width: '80px', textAlign: 'center' }}>
                         <input
                           type="checkbox"
-                          id={`is_csv_export_${field.field_id || index}_${field.field_name}`}
                           checked={field.is_csv_export}
                           onChange={(e) => {
-                            console.log('is_csv_export checkbox changed', { field_id: field.field_id, field_name: field.field_name, checked: e.target.checked, index });
-                            updateField(field.field_id, field.field_name, { is_csv_export: e.target.checked });
+                            updateField(field.field_id, { is_csv_export: e.target.checked });
                           }}
                           disabled={field.is_fixed && (field.field_name === '患者ID' || field.field_name === '患者名' || field.field_name === '年齢')}
                         />
-                      </td>
-                      <td style={{ width: '120px', textAlign: 'center', verticalAlign: 'middle' }}>
-                        {field.is_fixed ? (
-                          <span style={{ fontSize: '11px', color: '#999' }}>-</span>
-                        ) : field.is_csv_export ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-                            <label style={{ fontSize: '11px', margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <input
-                                type="radio"
-                                name={`csv_header_${field.field_id}`}
-                                checked={!field.is_csv_header_display_name}
-                                onChange={() => {
-                                  updateField(field.field_id, field.field_name, { is_csv_header_display_name: false });
-                                }}
-                                style={{ cursor: 'pointer' }}
-                              />
-                              <span>パス名</span>
-                            </label>
-                            <label style={{ fontSize: '11px', margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <input
-                                type="radio"
-                                name={`csv_header_${field.field_id}`}
-                                checked={field.is_csv_header_display_name === true}
-                                onChange={() => {
-                                  updateField(field.field_id, field.field_name, { is_csv_header_display_name: true });
-                                }}
-                                style={{ cursor: 'pointer' }}
-                              />
-                              <span>表示名</span>
-                            </label>
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: '11px', color: '#999' }}>-</span>
-                        )}
                       </td>
                       <td style={{ width: '60px', textAlign: 'center' }}>
                         {!field.is_fixed && (

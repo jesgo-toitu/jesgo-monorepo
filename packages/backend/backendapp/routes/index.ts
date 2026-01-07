@@ -744,11 +744,8 @@ router.post('/getCasesAndDocuments', async (req, res, next) => {
     '/getCasesAndDocuments',
     getUsernameFromRequest(req)
   );
-  // 権限の確認（プリセット表示でシステムオペレータも使用するため、login権限も許可）
-  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
-    roll.login,
-    roll.view,
-  ]);
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), roll.view);
   if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
     res.status(200).send(authResult);
     return;
@@ -1379,11 +1376,11 @@ router.post('/preset-save', async (req, res, next) => {
     getUsernameFromRequest(req)
   );
   
-  // 権限の確認（プラグイン登録と同様の権限設定）
-  const authResult: ApiReturnObject = await checkAuth(
-    getToken(req),
-    roll.pluginRegisterable
-  );
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.edit,
+  ]);
   if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
     res.status(200).send(authResult);
   } else {
@@ -1428,11 +1425,11 @@ router.delete('/preset-delete/:presetId', async (req, res, next) => {
     getUsernameFromRequest(req)
   );
   
-  // 権限の確認（プラグイン登録と同様の権限設定）
-  const authResult: ApiReturnObject = await checkAuth(
-    getToken(req),
-    roll.pluginRegisterable
-  );
+  // 権限の確認
+  const authResult: ApiReturnObject = await checkAuth(getToken(req), [
+    roll.login,
+    roll.remove,
+  ]);
   if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
     res.status(200).send(authResult);
   } else {

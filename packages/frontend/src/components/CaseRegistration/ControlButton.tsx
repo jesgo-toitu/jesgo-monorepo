@@ -343,7 +343,7 @@ export const ControlButton = React.memo((props: ControlButtonProps) => {
           if (findItem) {
             title = findItem.title;
           }
-          if (confirm(`[${title}]をコピーします。よろしいですか？`)) {
+          if (confirm(`[${title}]を複製します。よろしいですか？`)) {
             dispatch({
               type: 'COPY',
               documentId,
