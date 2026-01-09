@@ -47,6 +47,10 @@ services:
       - ./packages/backend/doc/DB/batch/ver150/02_create_fixed_field_tables.sql:/docker-entrypoint-initdb.d/23_ver150_02_create_fixed_field_tables.sql
       - ./packages/backend/doc/DB/batch/ver150/03_insert_sample_data.sql:/docker-entrypoint-initdb.d/24_ver150_03_insert_sample_data.sql
       - ./packages/backend/doc/DB/batch/ver150/04_fix_constraints.sql:/docker-entrypoint-initdb.d/25_ver150_04_fix_constraints.sql
+      - ./packages/backend/doc/DB/batch/ver150/05_create_function_search_jesgo_document.sql:/docker-entrypoint-initdb.d/26_ver150_05_create_function_search_jesgo_document.sql
+      - ./packages/backend/doc/DB/batch/ver150/06_create_function_search_jesgo_document_multiple.sql:/docker-entrypoint-initdb.d/27_ver150_06_create_function_search_jesgo_document_multiple.sql
+      - ./packages/backend/doc/DB/batch/ver150/07_create_function_get_jesgo_document.sql:/docker-entrypoint-initdb.d/28_ver150_07_create_function_get_jesgo_document.sql
+      - ./packages/backend/doc/DB/batch/ver150/08_create_function_get_jesgo_filtered_root_document.sql:/docker-entrypoint-initdb.d/29_ver150_08_create_function_get_jesgo_filtered_root_document.sql
     networks:
       - jesgo-network
     healthcheck:
@@ -109,7 +113,7 @@ services:
       WEBPACK_HOST: localhost
       WEBPACK_PORT: 3000
     ports:
-      - "3000:3030"
+      - "3000:3000"
     volumes:
       - ./packages/settings:/app/packages/settings
       - ./packages/common:/app/packages/common

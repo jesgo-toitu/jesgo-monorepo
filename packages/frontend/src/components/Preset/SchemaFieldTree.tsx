@@ -27,6 +27,10 @@ export interface SchemaFieldTreeItem {
   label: string;
   /** フィールドパス */
   path: string;
+  /** スキーマパス */
+  schemaPath: number[];
+  /** プロパティパス */
+  propertyPath: string[];
   /** 選択可能かどうか（終端項目のみ） */
   selectable: boolean;
   /** 子アイテム */
@@ -48,7 +52,7 @@ interface SchemaFieldTreeProps {
   /** スキーマデータ */
   schema: JSONSchema7;
   /** フィールド選択時のコールバック */
-  onFieldSelect: (fieldPath: string, fieldInfo: FieldInfo) => void;
+  onFieldSelect: (fieldPath: string, schemaPath: number[], propertyPath: string[], fieldInfo: FieldInfo) => void;
   /** 選択されたフィールドパス */
   selectedFieldPath?: string;
   /** スキーマ情報（child_schemaを取得するため） */
@@ -62,7 +66,8 @@ interface SchemaFieldTreeProps {
  */
 const generateChildSchemaItems = async (
   childSchemaIds: number[],
-  parentPath = ''
+  parentPath: string,
+  parentSchemaPath: number[]
 ): Promise<SchemaFieldTreeItem[]> => {
   const items: SchemaFieldTreeItem[] = [];
 
@@ -71,6 +76,9 @@ const generateChildSchemaItems = async (
       const schemaInfo = GetSchemaInfo(childSchemaId);
       
       if (schemaInfo && schemaInfo.document_schema) {
+        const targetSchemaPath = [...parentSchemaPath];
+        targetSchemaPath.push(childSchemaId);
+
         // child_schemaのschema_id_stringからスキーマID部分を抽出（例: /schema/record/flavor -> flavor）
         const schemaIdString = schemaInfo.schema_id_string;
         const pathParts = schemaIdString.split('/').filter(part => part !== '' && part !== 'schema');
@@ -84,6 +92,8 @@ const generateChildSchemaItems = async (
         const childSchemaItems = generateTreeItems(
           schemaInfo.document_schema,
           targetParentPath,
+          targetSchemaPath,
+          [],
           schemaInfo.document_schema.required,
           undefined,
           schemaInfo.document_schema
@@ -95,6 +105,8 @@ const generateChildSchemaItems = async (
           id: `child:${parentPath ? `${parentPath}.` : ''}${schemaIdString}`,
           label: schemaInfo.title || childSchemaIdName,
           path: targetParentPath,
+          schemaPath: targetSchemaPath,
+          propertyPath: [],
           selectable: false,
           children: childSchemaItems,
           isSubSchema: false, // child_schemaはサブスキーマではない
@@ -121,7 +133,7 @@ const generateChildSchemaItems = async (
           }
           
           if (nestedPaths.length > 0) {
-            const nestedSubSchemaItems = await generateSubSchemaItems(nestedPaths, targetParentPath);
+            const nestedSubSchemaItems = await generateSubSchemaItems(nestedPaths, targetParentPath, targetSchemaPath);
             
             // ネストされたサブスキーマアイテムを追加
             childSchemaRootItem.children = [...childSchemaItems, ...nestedSubSchemaItems];
@@ -130,7 +142,7 @@ const generateChildSchemaItems = async (
         
         // child_schema内にchild_schemaがある場合も処理
         if (nestedChildSchemaIds.length > 0) {
-          const nestedChildSchemaItems = await generateChildSchemaItems(nestedChildSchemaIds, targetParentPath);
+          const nestedChildSchemaItems = await generateChildSchemaItems(nestedChildSchemaIds, targetParentPath, targetSchemaPath);
           
           // ネストされたchild_schemaアイテムを追加
           childSchemaRootItem.children = [...(childSchemaRootItem.children || []), ...nestedChildSchemaItems];
@@ -151,7 +163,8 @@ const generateChildSchemaItems = async (
  */
 const generateSubSchemaItems = async (
   subSchemaPaths: string[],
-  parentPath = ''
+  parentPath = '',
+  parentSchemaPath: number[]
 ): Promise<SchemaFieldTreeItem[]> => {
   const items: SchemaFieldTreeItem[] = [];
 
@@ -187,6 +200,9 @@ const generateSubSchemaItems = async (
       const schemaInfo = GetSchemaInfo(schemaId);
       
       if (schemaInfo && schemaInfo.document_schema) {
+        const targetSchemaPath = [...parentSchemaPath];
+        targetSchemaPath.push(schemaId);
+
         // サブスキーマパスのスキーマID部分を抽出（例: /schema/treatment/radiotherapy -> radiotherapy）
         const subSchemaId = subSchemaPath.split('/').pop() || subSchemaPath;
         
@@ -198,6 +214,8 @@ const generateSubSchemaItems = async (
         const subSchemaItems = generateTreeItems(
           schemaInfo.document_schema,
           targetParentPath,
+          targetSchemaPath,
+          [],
           schemaInfo.document_schema.required,
           undefined,
           schemaInfo.document_schema
@@ -209,6 +227,8 @@ const generateSubSchemaItems = async (
           id: `subschema:${parentPath ? `${parentPath}.` : ''}${subSchemaPath}`,
           label: schemaInfo.title || subSchemaId,
           path: targetParentPath,
+          schemaPath: targetSchemaPath,
+          propertyPath: [],
           selectable: false,
           children: subSchemaItems,
           isSubSchema: true,
@@ -234,7 +254,7 @@ const generateSubSchemaItems = async (
           }
           
           if (nestedPaths.length > 0) {
-            const nestedSubSchemaItems = await generateSubSchemaItems(nestedPaths, targetParentPath);
+            const nestedSubSchemaItems = await generateSubSchemaItems(nestedPaths, targetParentPath, targetSchemaPath);
             
             // ネストされたサブスキーマアイテムを追加
             subSchemaRootItem.children = [...subSchemaItems, ...nestedSubSchemaItems];
@@ -243,7 +263,7 @@ const generateSubSchemaItems = async (
         
         // サブスキーマ内にchild_schemaがある場合も処理
         if (nestedChildSchemaIds.length > 0) {
-          const nestedChildSchemaItems = await generateChildSchemaItems(nestedChildSchemaIds, targetParentPath);
+          const nestedChildSchemaItems = await generateChildSchemaItems(nestedChildSchemaIds, targetParentPath, targetSchemaPath);
           
           // ネストされたchild_schemaアイテムを追加
           subSchemaRootItem.children = [...(subSchemaRootItem.children || []), ...nestedChildSchemaItems];
@@ -421,6 +441,8 @@ const resolveRef = (ref: string, rootSchema: JSONSchema7): JSONSchema7 | null =>
 const generateTreeItems = (
   schema: JSONSchema7,
   parentPath = '',
+  parentSchemaPath: number[],
+  parentPropertyPath: string[],
   parentRequired?: string[],
   rootSchema?: JSONSchema7,
   originalSchema?: JSONSchema7 // 元のスキーマ（$defsを含む）
@@ -467,6 +489,9 @@ const generateTreeItems = (
 
   // スキーマの各プロパティを処理（Registrationのprops.properties.map((prop) => prop.content)と同じロジック）
   for (const [key, fieldSchema] of Object.entries(schemaProps.pItems)) {
+    const targetPrpertyPath = [...parentPropertyPath];
+    targetPrpertyPath.push(key);
+
     const currentPath = parentPath ? `${parentPath}.${key}` : key;
     let typedFieldSchema = fieldSchema as JSONSchema7;
     
@@ -496,140 +521,158 @@ const generateTreeItems = (
     }
 
     // Registrationのrjsfと同様に、propertiesがあれば再帰的に処理
-  // typeがobject、またはpropertiesを持つオブジェクトはすべて再帰的に処理
-  // allOfやoneOfなど、スキーマが複雑に展開されている可能性もある
-  const hasProperties = typedFieldSchema.properties !== undefined && 
-                       typedFieldSchema.properties !== null && 
-                       Object.keys(typedFieldSchema.properties).length > 0;
-  
-  // if-thenがある場合は、全ての条件付きフィールドを展開
-  if (typedFieldSchema.if && typedFieldSchema.then) {
-    const expandedSchema = expandIfThenProperties(typedFieldSchema, originalSchema);
+    // typeがobject、またはpropertiesを持つオブジェクトはすべて再帰的に処理
+    // allOfやoneOfなど、スキーマが複雑に展開されている可能性もある
+    const hasProperties = typedFieldSchema.properties !== undefined && 
+                         typedFieldSchema.properties !== null && 
+                         Object.keys(typedFieldSchema.properties).length > 0;
     
-    if (expandedSchema.properties && Object.keys(expandedSchema.properties).length > 0) {
-      const childItems = generateTreeItems(
-        expandedSchema,
-        currentPath,
-        expandedSchema.required,
-        rootSchema,
-        originalSchema
-      );
-      
-      if (childItems.length > 0) {
-        items.push({
-          id: currentPath,
-          label: key,
-          path: currentPath,
-          selectable: false,
-          children: childItems,
-          fieldInfo,
-        });
-        continue;
-      }
-    }
-  }
-  
-  // allOfがある場合は、全ての条件付きフィールドを展開
-  if (typedFieldSchema.allOf && Array.isArray(typedFieldSchema.allOf)) {
-    const expandedSchema = expandAllOfProperties(typedFieldSchema, originalSchema);
-    
-    if (expandedSchema.properties && Object.keys(expandedSchema.properties).length > 0) {
-      const childItems = generateTreeItems(
-        expandedSchema,
-        currentPath,
-        expandedSchema.required,
-        rootSchema,
-        originalSchema
-      );
-      
-      if (childItems.length > 0) {
-        items.push({
-          id: currentPath,
-          label: key,
-          path: currentPath,
-          selectable: false,
-          children: childItems,
-          fieldInfo,
-        });
-        continue;
-      }
-    }
-  }
-  
-  // CustomSchemaで処理済みなので、$refが直接残っている場合は再解決する必要がある
-  // ただし、通常はCustomSchemaが既に解決済みなので、以下をチェック
-  const refValue = (typedFieldSchema as any).$ref;
-  let resolvedSchema = typedFieldSchema;
-    
-    // $refが残っている場合は原初スキーマから解決を試みる
-  if (refValue && typeof refValue === 'string') {
-    const resolved = resolveRef(refValue, originalSchema);
-    
-    if (resolved) {
-      resolvedSchema = resolved;
-      
-      // 解決されたスキーマからプロパティを再取得
-      const resolvedHasProperties = resolvedSchema.properties !== undefined && 
-                                   resolvedSchema.properties !== null && 
-                                   Object.keys(resolvedSchema.properties).length > 0;
-      
-      if (resolvedHasProperties) {
+    // if-thenがある場合は、全ての条件付きフィールドを展開
+    if (typedFieldSchema.if && typedFieldSchema.then) {
+      const expandedSchema = expandIfThenProperties(typedFieldSchema, originalSchema);
+
+      if (expandedSchema.properties && Object.keys(expandedSchema.properties).length > 0) {
         const childItems = generateTreeItems(
-          resolvedSchema,
+          expandedSchema,
           currentPath,
-          resolvedSchema.required,
+          parentSchemaPath,
+          targetPrpertyPath,
+          expandedSchema.required,
           rootSchema,
           originalSchema
         );
 
+        if (childItems.length > 0) {
+          items.push({
+            id: currentPath,
+            label: key,
+            path: currentPath,
+            schemaPath: parentSchemaPath,
+            propertyPath: targetPrpertyPath,
+            selectable: false,
+            children: childItems,
+            fieldInfo,
+          });
+          continue;
+        }
+      }
+    }
+
+    // allOfがある場合は、全ての条件付きフィールドを展開
+    if (typedFieldSchema.allOf && Array.isArray(typedFieldSchema.allOf)) {
+      const expandedSchema = expandAllOfProperties(typedFieldSchema, originalSchema);
+
+      if (expandedSchema.properties && Object.keys(expandedSchema.properties).length > 0) {
+        const childItems = generateTreeItems(
+          expandedSchema,
+          currentPath,
+          parentSchemaPath,
+          targetPrpertyPath,
+          expandedSchema.required,
+          rootSchema,
+          originalSchema
+        );
+
+        if (childItems.length > 0) {
+          items.push({
+            id: currentPath,
+            label: key,
+            path: currentPath,
+            schemaPath: parentSchemaPath,
+            propertyPath: targetPrpertyPath,
+            selectable: false,
+            children: childItems,
+            fieldInfo,
+          });
+          continue;
+        }
+      }
+    }
+
+    // CustomSchemaで処理済みなので、$refが直接残っている場合は再解決する必要がある
+    // ただし、通常はCustomSchemaが既に解決済みなので、以下をチェック
+    const refValue = (typedFieldSchema as any).$ref;
+    let resolvedSchema = typedFieldSchema;
+
+    // $refが残っている場合は原初スキーマから解決を試みる
+    if (refValue && typeof refValue === 'string') {
+      const resolved = resolveRef(refValue, originalSchema);
+
+      if (resolved) {
+        resolvedSchema = resolved;
+
+        // 解決されたスキーマからプロパティを再取得
+        const resolvedHasProperties = resolvedSchema.properties !== undefined && 
+                                     resolvedSchema.properties !== null && 
+                                     Object.keys(resolvedSchema.properties).length > 0;
+
+        if (resolvedHasProperties) {
+          const childItems = generateTreeItems(
+            resolvedSchema,
+            currentPath,
+            parentSchemaPath,
+            targetPrpertyPath,
+            resolvedSchema.required,
+            rootSchema,
+            originalSchema
+          );
+
+          items.push({
+            id: currentPath,
+            label: key,
+            path: currentPath,
+            schemaPath: parentSchemaPath,
+            propertyPath: targetPrpertyPath,
+            selectable: false,
+            children: childItems,
+            fieldInfo,
+          });
+          continue; // 次のプロパティへ
+        }
+      }
+    }
+
+    // oneOfがある場合は処理
+    if (resolvedSchema.oneOf && Array.isArray(resolvedSchema.oneOf)) {
+      // oneOfの場合、すべての選択肢を展開する
+      const childItems: SchemaFieldTreeItem[] = [];
+      resolvedSchema.oneOf.forEach((oneOfItem: any) => {
+        if (oneOfItem.properties) {
+          const oneOfChildren = generateTreeItems(
+            oneOfItem,
+            currentPath,
+            parentSchemaPath,
+            targetPrpertyPath,
+            oneOfItem.required,
+            rootSchema,
+            originalSchema
+          );
+          childItems.push(...oneOfChildren);
+        }
+      });
+
+      if (childItems.length > 0) {
         items.push({
           id: currentPath,
           label: key,
           path: currentPath,
+          schemaPath: parentSchemaPath,
+          propertyPath: targetPrpertyPath,
           selectable: false,
           children: childItems,
           fieldInfo,
         });
-        continue; // 次のプロパティへ
+        continue;
       }
     }
-  }
-  
-  // oneOfがある場合は処理
-  if (resolvedSchema.oneOf && Array.isArray(resolvedSchema.oneOf)) {
-    // oneOfの場合、すべての選択肢を展開する
-    const childItems: SchemaFieldTreeItem[] = [];
-    resolvedSchema.oneOf.forEach((oneOfItem: any) => {
-      if (oneOfItem.properties) {
-        const oneOfChildren = generateTreeItems(
-          oneOfItem,
-          currentPath,
-          oneOfItem.required,
-          rootSchema,
-          originalSchema
-        );
-        childItems.push(...oneOfChildren);
-      }
-    });
-    
-    if (childItems.length > 0) {
-      items.push({
-        id: currentPath,
-        label: key,
-        path: currentPath,
-        selectable: false,
-        children: childItems,
-        fieldInfo,
-      });
-      continue;
-    }
-  }
     
     if (hasProperties) {
       // オブジェクトの場合は再帰的に処理（小階層も含む）
       const childItems = generateTreeItems(
         typedFieldSchema,
         currentPath,
+        parentSchemaPath,
+        targetPrpertyPath,
         typedFieldSchema.required,
         rootSchema,
         originalSchema
@@ -640,6 +683,8 @@ const generateTreeItems = (
         id: currentPath,
         label: key,
         path: currentPath,
+        schemaPath: parentSchemaPath,
+        propertyPath: targetPrpertyPath,
         selectable: false, // オブジェクトは選択不可
         children: childItems,
         fieldInfo,
@@ -654,10 +699,14 @@ const generateTreeItems = (
                                      Object.keys(arrayItemSchema.properties).length > 0;
       
       if (arrayItemHasProperties) {
+        const arrayPropertyPath = [...targetPrpertyPath];
+        arrayPropertyPath.push('0');
         // 配列の要素がオブジェクトの場合（小階層を含む）
         const childItems = generateTreeItems(
           arrayItemSchema,
           `${currentPath}[0]`,
+          parentSchemaPath,
+          arrayPropertyPath,
           arrayItemSchema.required,
           rootSchema,
           originalSchema
@@ -667,6 +716,8 @@ const generateTreeItems = (
           id: currentPath,
           label: key,
           path: currentPath,
+          schemaPath: parentSchemaPath,
+          propertyPath: targetPrpertyPath,
           selectable: false, // 配列は選択不可
           children: childItems,
           fieldInfo,
@@ -677,6 +728,8 @@ const generateTreeItems = (
           id: currentPath,
           label: key,
           path: currentPath,
+          schemaPath: parentSchemaPath,
+          propertyPath: targetPrpertyPath,
           selectable: true, // プリミティブ配列は選択可能
           fieldInfo,
         });
@@ -687,6 +740,8 @@ const generateTreeItems = (
         id: currentPath,
         label: key,
         path: currentPath,
+        schemaPath: parentSchemaPath,
+        propertyPath: targetPrpertyPath,
         selectable: true, // 終端項目は選択可能
         fieldInfo,
       });
@@ -701,17 +756,18 @@ const generateTreeItems = (
  */
 const renderTreeItem = (
   item: SchemaFieldTreeItem,
-  onFieldSelect: (fieldPath: string, fieldInfo: FieldInfo) => void,
+  onFieldSelect: (fieldPath: string, schemaPath: number[], propertyPath: string[], fieldInfo: FieldInfo) => void,
   selectedFieldPath?: string
 ): React.ReactNode => {
   const isSelected = selectedFieldPath === item.path;
   
   const labelContent = (
     <Box
+      data-field-path={item.path}
       onClick={(e) => {
         if (item.selectable && item.fieldInfo) {
           e.stopPropagation();
-          onFieldSelect(item.path, item.fieldInfo);
+          onFieldSelect(item.path, item.schemaPath, item.propertyPath, item.fieldInfo);
         }
       }}
       style={{
@@ -843,6 +899,8 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['root']));
   // コールバックをrefで保持して、依存配列から除外する
   const onSelectableFieldsReadyRef = useRef(onSelectableFieldsReady);
+  // スクロール可能なコンテナのref
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   // コールバックが変更されたらrefを更新
   useEffect(() => {
@@ -878,6 +936,39 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
   // すべて閉じる処理
   const handleCollapseAll = useCallback(() => {
     setExpandedItems(new Set(['root']));
+  }, []);
+
+  // 選択されたパスまでの親ノードを展開する関数
+  const getExpandedIdsForPath = useCallback((items: SchemaFieldTreeItem[], targetPath: string): string[] => {
+    const expandedIds: string[] = ['root'];
+    
+    const findPath = (items: SchemaFieldTreeItem[]): boolean => {
+      for (const item of items) {
+        // 選択されたパスと一致する場合は終了
+        if (item.path === targetPath) {
+          expandedIds.push(item.id);
+          return true;
+        }
+        
+        // 選択されたパスが現在のアイテムのパスで始まる場合は子を探索
+        // 例: targetPath = "radiotherapy.dose" で item.path = "radiotherapy" の場合
+        if (targetPath.startsWith(item.path + '.')) {
+          // 親ノードとして展開
+          expandedIds.push(item.id);
+          if (item.children && item.children.length > 0) {
+            if (findPath(item.children)) {
+              return true;
+            }
+          }
+          // 子で見つからなかった場合は、このアイテムのIDを削除
+          expandedIds.pop();
+        }
+      }
+      return false;
+    };
+    
+    findPath(items);
+    return expandedIds;
   }, []);
 
   useEffect(() => {
@@ -922,7 +1013,7 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
           
           // 処理済みスキーマからツリーアイテムを生成（ルートスキーマも渡す）
           // originalSchema（元のスキーマ）も渡して、$defs参照を可能にする
-          const regularItems = generateTreeItems(processedSchema, '', undefined, processedSchema, schema);
+          const regularItems = generateTreeItems(processedSchema, '', [schemaInfo?.schema_id!], [], undefined, processedSchema, schema);
           
           // jesgo:subschemaをチェック
           const subSchemaPaths = (processedSchema as any)['jesgo:subschema'];
@@ -930,22 +1021,22 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
           
           if (subSchemaPaths && Array.isArray(subSchemaPaths)) {
             // サブスキーマアイテムを生成
-            const subSchemaItems = await generateSubSchemaItems(subSchemaPaths);
+            const subSchemaItems = await generateSubSchemaItems(subSchemaPaths, '', [schemaInfo?.schema_id!]);
             allItems = [...regularItems, ...subSchemaItems];
           }
           
           // child_schemaをチェック（schemaInfoから取得）
           if (schemaInfo && schemaInfo.child_schema && Array.isArray(schemaInfo.child_schema) && schemaInfo.child_schema.length > 0) {
             // child_schemaアイテムを生成
-            const childSchemaItems = await generateChildSchemaItems(schemaInfo.child_schema);
+            const childSchemaItems = await generateChildSchemaItems(schemaInfo.child_schema, '', [schemaInfo?.schema_id!]);
             allItems = [...allItems, ...childSchemaItems];
           }
-          
+
           setTreeItems(allItems);
         } catch (error) {
           console.error('ツリーアイテムの生成に失敗しました:', error);
           // エラーが発生した場合は通常のアイテムのみ表示
-          const regularItems = generateTreeItems(schema);
+          const regularItems = generateTreeItems(schema, '', [schemaInfo?.schema_id!], []);
           setTreeItems(regularItems);
         } finally {
           setIsLoading(false);
@@ -981,8 +1072,22 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
   // ツリーアイテムが変更されたら、すべて展開状態にする
   useEffect(() => {
     if (treeItems.length > 0) {
-      const allIds = getAllItemIds(treeItems);
-      setExpandedItems(new Set(allIds));
+      // 選択されたパスがある場合は、そのパスまでの親ノードを展開
+      if (selectedFieldPath) {
+        const expandedIds = getExpandedIdsForPath(treeItems, selectedFieldPath);
+        // 選択されたパスが見つかった場合は展開、見つからない場合はすべて展開
+        if (expandedIds.length > 1) {
+          setExpandedItems(new Set(expandedIds));
+        } else {
+          // パスが見つからない場合は、すべて展開
+          const allIds = getAllItemIds(treeItems);
+          setExpandedItems(new Set(allIds));
+        }
+      } else {
+        // 選択されたパスがない場合は、すべて展開
+        const allIds = getAllItemIds(treeItems);
+        setExpandedItems(new Set(allIds));
+      }
       
       // 選択可能な全項目を取得してコールバックを呼び出す
       // refを使用することで、依存配列から除外して無限ループを防ぐ
@@ -991,7 +1096,47 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
         onSelectableFieldsReadyRef.current(selectableFields);
       }
     }
-  }, [treeItems, getAllItemIds, getSelectableFields]);
+  }, [treeItems, getAllItemIds, getSelectableFields, selectedFieldPath, getExpandedIdsForPath]);
+
+  // 選択されたパスが変更されたときに、その要素までスクロールする
+  useEffect(() => {
+    if (selectedFieldPath && scrollContainerRef.current) {
+      // DOMが更新されるのを待つ
+      const timeoutId = setTimeout(() => {
+        // 選択されたパスに対応する要素を検索
+        const selectedElement = scrollContainerRef.current?.querySelector(
+          `[data-field-path="${selectedFieldPath}"]`
+        ) as HTMLElement;
+        
+        if (selectedElement && scrollContainerRef.current) {
+          // 要素の位置を取得
+          const elementRect = selectedElement.getBoundingClientRect();
+          const containerRect = scrollContainerRef.current.getBoundingClientRect();
+          
+          // 要素がコンテナの表示範囲外にある場合はスクロール
+          if (
+            elementRect.top < containerRect.top ||
+            elementRect.bottom > containerRect.bottom
+          ) {
+            // 要素が表示範囲の中央に来るようにスクロール
+            const scrollTop =
+              scrollContainerRef.current.scrollTop +
+              elementRect.top -
+              containerRect.top -
+              (containerRect.height / 2) +
+              (elementRect.height / 2);
+            
+            scrollContainerRef.current.scrollTo({
+              top: scrollTop,
+              behavior: 'smooth',
+            });
+          }
+        }
+      }, 100); // DOM更新を待つための短い遅延
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [selectedFieldPath, expandedItems]);
 
   if (isLoading) {
     return (
@@ -1060,13 +1205,16 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
         </Button>
       </div>
       
-      <div style={{ 
-        maxHeight: '400px', 
-        overflowY: 'auto',
-        border: '1px solid #ddd',
-        borderRadius: '4px',
-        backgroundColor: '#fff'
-      }}>
+      <div 
+        ref={scrollContainerRef}
+        style={{ 
+          maxHeight: '400px', 
+          overflowY: 'auto',
+          border: '1px solid #ddd',
+          borderRadius: '4px',
+          backgroundColor: '#fff'
+        }}
+      >
         <TreeView
           expandedItems={Array.from(expandedItems)}
           onExpandedItemsChange={(event, itemIds) => setExpandedItems(new Set(itemIds as string[]))}

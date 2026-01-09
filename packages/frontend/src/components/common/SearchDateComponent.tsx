@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   FormControl,
   FormGroup,
@@ -61,11 +61,18 @@ const SearchDateComponent = React.memo(
 
     const [isRangeSearch, setIsRangeSearch] = useState(false);
 
+    // 無限ループを防ぐため、前回の値を保存
+    const prevValueRef = useRef<searchDateInfoDataSet | undefined>(undefined);
+    // 親から渡された値を反映中かどうかを追跡するフラグ
+    const isUpdatingFromParentRef = useRef(false);
+    // 親から渡された値の前回の値を保存（画面切替時の無限ループ防止）
+    const prevSearchValueRef = useRef<searchDateInfoDataSet | undefined>(undefined);
+
     const checkedValue = (targetValue: string) =>
       radioSelectedValue === targetValue;
 
     // 年次/月次/日次ラジオボタン選択時のイベント
-    const onChangeRadio = (e: React.FormEvent<Radio> | string) => {
+    const onChangeRadio = useCallback((e: React.FormEvent<Radio> | string) => {
       let selectedValue = '';
       if (typeof e === 'string') {
         selectedValue = e;
@@ -94,7 +101,7 @@ const SearchDateComponent = React.memo(
         default:
           break;
       }
-    };
+    }, []);
 
     // 日付入力時のイベント
     const onChangeDateText = (e: React.FormEvent<FormControl>) => {
@@ -176,16 +183,99 @@ const SearchDateComponent = React.memo(
     }
 
     useEffect(() => {
+      // 親から渡された値を反映中の場合は、親への通知をスキップ（無限ループ防止）
+      if (isUpdatingFromParentRef.current) {
+        return;
+      }
+
+      // 画面切替時（searchValueが変更された場合）は、親への通知をスキップ（無限ループ防止）
+      // prevSearchValueRef.currentが設定されていて、searchValueが変更された場合を検出
+      const prevSearchValue = prevSearchValueRef.current;
+      if (prevSearchValue !== undefined && prevSearchValue !== null) {
+        // searchValueがundefinedまたはnullから値に変わった場合、または値が変更された場合
+        if (
+          (searchValue === undefined && prevSearchValue !== undefined) ||
+          (searchValue === null && prevSearchValue !== null) ||
+          (searchValue !== undefined && searchValue !== null && prevSearchValue === undefined) ||
+          (searchValue !== undefined && searchValue !== null && prevSearchValue === null) ||
+          (searchValue !== undefined && searchValue !== null && prevSearchValue !== undefined && prevSearchValue !== null && (
+            JSON.stringify(prevSearchValue.fromInfo) !== JSON.stringify(searchValue.fromInfo) ||
+            JSON.stringify(prevSearchValue.toInfo) !== JSON.stringify(searchValue.toInfo) ||
+            prevSearchValue.isRange !== searchValue.isRange ||
+            prevSearchValue.searchType !== searchValue.searchType
+          ))
+        ) {
+          // 親から渡された値が変更された場合（画面切替時）は、親への通知をスキップ
+          // 内部状態は次のuseEffectで更新されるため、ここでは通知しない
+          return;
+        }
+      }
+
       // 入力値を親に返す
-      setSearchDateInfoDataSet({
+      // 無限ループを防ぐため、前回の値と比較して変更があった場合のみ更新
+      const newValue = {
         fromInfo: dateFromInfo,
         toInfo: dateToInfo,
         isRange: isRangeSearch,
         searchType: radioSelectedValue,
-      });
-    }, [dateFromInfo, dateToInfo, isRangeSearch, radioSelectedValue]);
+      };
+      
+      // 親から渡された値と現在の値が一致している場合は更新しない（無限ループ防止）
+      if (
+        searchValue &&
+        JSON.stringify(searchValue.fromInfo) === JSON.stringify(newValue.fromInfo) &&
+        JSON.stringify(searchValue.toInfo) === JSON.stringify(newValue.toInfo) &&
+        searchValue.isRange === newValue.isRange &&
+        searchValue.searchType === newValue.searchType
+      ) {
+        // 親から渡された値と一致しているため、更新しない
+        prevValueRef.current = newValue;
+        return;
+      }
+      
+      // 前回の値と比較して変更があった場合のみ更新
+      const prevValue = prevValueRef.current;
+      if (
+        !prevValue ||
+        JSON.stringify(prevValue.fromInfo) !== JSON.stringify(newValue.fromInfo) ||
+        JSON.stringify(prevValue.toInfo) !== JSON.stringify(newValue.toInfo) ||
+        prevValue.isRange !== newValue.isRange ||
+        prevValue.searchType !== newValue.searchType
+      ) {
+        prevValueRef.current = newValue;
+        setSearchDateInfoDataSet(newValue);
+      }
+      // searchValueは依存配列に含めない（親からの値変更は別のuseEffectで処理される）
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dateFromInfo, dateToInfo, isRangeSearch, radioSelectedValue, setSearchDateInfoDataSet]);
 
     useEffect(() => {
+      // 親から渡された値の前回の値を更新（画面切替時の無限ループ防止）
+      prevSearchValueRef.current = searchValue;
+
+      // 親から渡された値と現在の内部状態を比較
+      const currentValue = {
+        fromInfo: dateFromInfo,
+        toInfo: dateToInfo,
+        isRange: isRangeSearch,
+        searchType: radioSelectedValue,
+      };
+
+      // 親から渡された値と現在の値が一致している場合は更新しない（無限ループ防止）
+      if (
+        searchValue &&
+        JSON.stringify(searchValue.fromInfo) === JSON.stringify(currentValue.fromInfo) &&
+        JSON.stringify(searchValue.toInfo) === JSON.stringify(currentValue.toInfo) &&
+        searchValue.isRange === currentValue.isRange &&
+        searchValue.searchType === currentValue.searchType
+      ) {
+        // 既に一致しているため、更新不要
+        return;
+      }
+
+      // 親から渡された値を反映中であることをマーク
+      isUpdatingFromParentRef.current = true;
+
       if (!searchValue) {
         // 検索条件リセット
         setRadioSelectedValue(radioDefaultValue);
@@ -196,11 +286,47 @@ const SearchDateComponent = React.memo(
         setDateToInfo(dateInfoDefaultValue);
       } else {
         // 検索条件設定
-        onChangeRadio(searchValue.searchType);
+        // onChangeRadioを呼び出す代わりに、直接状態を更新して無限ループを防ぐ
+        const selectedValue = searchValue.searchType;
+        setRadioSelectedValue(selectedValue);
+        // ラジオボタンの選択に応じて、月・日の表示状態を更新
+        switch (selectedValue) {
+          case '年次': {
+            setisHiddenMonth(true);
+            setisHiddenDay(true);
+            break;
+          }
+          case '月次': {
+            setisHiddenMonth(false);
+            setisHiddenDay(true);
+            break;
+          }
+          case '日次': {
+            setisHiddenMonth(false);
+            setisHiddenDay(false);
+            break;
+          }
+          default:
+            break;
+        }
         setIsRangeSearch(searchValue.isRange);
         setDateFromInfo(searchValue.fromInfo);
         setDateToInfo(searchValue.toInfo);
       }
+
+      // 親からの値の反映が完了したことをマーク
+      // 非同期の状態更新が完了するまで待ってからリセット
+      // setTimeoutを使用して、次のレンダリングサイクルでリセット
+      const timeoutId = setTimeout(() => {
+        isUpdatingFromParentRef.current = false;
+      }, 0);
+      
+      // クリーンアップ関数でタイマーをクリア
+      return () => {
+        clearTimeout(timeoutId);
+        isUpdatingFromParentRef.current = false;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchValue]);
 
     // 検索条件に現在日セット

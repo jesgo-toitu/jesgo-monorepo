@@ -41,6 +41,8 @@ interface PresetItemField {
   display_name: string;
   field_path?: string;
   field_type?: string;
+  schema_path?: number[];
+  property_path?: string[];
   is_visible: boolean;
   is_csv_export: boolean;
   is_csv_header_display_name?: boolean;
@@ -80,6 +82,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
   
   // スキーマ関連の状態
   const [availableSchemas, setAvailableSchemas] = useState<treeSchema[]>([]);
+  const [availableCommonSchemas, setAvailableCommonSchemas] = useState<treeSchema[]>([]);
   const [selectedSchemaId, setSelectedSchemaId] = useState<number | null>(null);
   const [selectedSchemaInfo, setSelectedSchemaInfo] = useState<JesgoDocumentSchema | null>(null);
   const [selectedFieldPath, setSelectedFieldPath] = useState<string>('');
@@ -275,6 +278,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
         if (treeApiReturnObject.statusNum === RESULT.NORMAL_TERMINATION) {
           const returned = treeApiReturnObject.body as treeApiObject;
           setAvailableSchemas(returned.treeSchema);
+          setAvailableCommonSchemas(returned.commonTreeSchema);
         }
       } catch (error) {
         console.error('スキーマツリーの取得に失敗しました:', error);
@@ -514,6 +518,20 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
   const openFieldSelectModal = (fieldId: number | undefined) => {
     if (fieldId) {
       setSelectingFieldId(fieldId.toString());
+      
+      // 既存のフィールド情報を取得
+      const field = fields.find(f => f.field_id === fieldId);
+      
+      // 既にパスが設定されている場合は、スキーマとフィールドパスを設定
+      if (field && field.schema_id && field.field_path) {
+        setSelectedSchemaId(field.schema_id);
+        setSelectedFieldPath(field.field_path);
+      } else {
+        // 新規の場合はリセット
+        setSelectedSchemaId(null);
+        setSelectedFieldPath('');
+      }
+      
       setShowFieldSelectModal(true);
     }
   };
@@ -525,7 +543,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
   };
 
   // フィールド選択時の処理
-  const handleFieldSelect = (fieldPath: string, fieldInfo: FieldInfo) => {
+  const handleFieldSelect = (fieldPath: string, schemaPath: number[], propertyPath: string[], fieldInfo: FieldInfo) => {
     if (selectingFieldId && selectedSchemaInfo) {
       // 表示名を生成
       let displayFieldName = fieldPath;
@@ -564,7 +582,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
         for (const childSchemaId of selectedSchemaInfo.child_schema) {
           const childSchemaInfo = GetSchemaInfo(childSchemaId);
           if (childSchemaInfo && childSchemaInfo.schema_id_string) {
-            // child_schemaのschema_id_stringからパス名を抽出
+            // child_schemaのschema_id_stringからパスを抽出
             // 例: /schema/record/flavor -> flavor
             const schemaIdString = childSchemaInfo.schema_id_string;
             if (typeof schemaIdString === 'string') {
@@ -651,6 +669,8 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
         display_name: displayFieldName,
         field_path: fieldPath, // フルパスを保存
         field_type: fieldType,
+        schema_path: schemaPath,
+        property_path: propertyPath,
         schema_primary_id: selectedSchemaInfo.schema_primary_id,
         schema_id: selectedSchemaInfo.schema_id,
         schema_id_string: selectedSchemaInfo.schema_id_string,
@@ -893,6 +913,8 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
           display_name: field.display_name,
           field_path: field.field_path,
           field_type: field.field_type,
+          schema_path: field.schema_path,
+          property_path: field.property_path,
           is_visible: field.is_visible,
           is_csv_export: field.is_csv_export,
           is_csv_header_display_name: field.is_csv_header_display_name !== undefined ? field.is_csv_header_display_name : false,
@@ -958,6 +980,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
     <Modal 
       show={show} 
       onHide={onHide}
+      backdrop="static"
       dialogClassName="preset-edit-modal-dialog"
     >
       <Modal.Header closeButton>
@@ -1124,7 +1147,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                               ? (field.schema_title && field.schema_title !== '-' 
                                   ? `${field.schema_title}.${field.field_name}` 
                                   : field.field_name)
-                              : 'パス名を選択'}
+                              : 'パスを選択'}
                           </span>
                           {!field.is_fixed && (
                             <Button
@@ -1187,7 +1210,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
                                 }}
                                 style={{ cursor: 'pointer' }}
                               />
-                              <span>パス名</span>
+                              <span>パス</span>
                             </label>
                             <label style={{ fontSize: '11px', margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
                               <input
@@ -1279,11 +1302,20 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
               style={{ marginTop: '5px' }}
             >
               <option value="">スキーマを選択してください</option>
-              {availableSchemas.map((schema) => (
-                <option key={schema.schema_id} value={schema.schema_id}>
-                  {schema.schema_title}
-                </option>
-              ))}
+              <optgroup label="ルート">
+                {availableSchemas.sort((a, b) => a.schema_id - b.schema_id).map((schema) => (
+                  <option key={schema.schema_id} value={schema.schema_id}>
+                    {schema.schema_title}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="共通">
+                {availableCommonSchemas.sort((a, b) => a.schema_id - b.schema_id).map((schema) => (
+                  <option key={schema.schema_id} value={schema.schema_id}>
+                    {schema.schema_title}
+                  </option>
+                ))}
+              </optgroup>
             </FormControl>
           </div>
 
@@ -1309,7 +1341,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
           )}
         </Modal.Body>
         <Modal.Footer>
-          {selectedSchemaInfo && (
+          {/*selectedSchemaInfo && (
             <Button
               bsStyle="primary"
               onClick={handleBulkAdd}
@@ -1317,7 +1349,7 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
             >
               一括追加
             </Button>
-          )}
+          )*/}
           <Button onClick={closeFieldSelectModal}>キャンセル</Button>
         </Modal.Footer>
       </Modal>

@@ -5,6 +5,8 @@ import {
   ButtonGroup,
   ButtonToolbar,
   Glyphicon,
+  OverlayTrigger,
+  Tooltip,
 } from 'react-bootstrap';
 import IconList from './IconList';
 import * as CommonConstants from '@jesgo/common';
@@ -234,6 +236,42 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
 
   // デバッグログは削除（無限ループの原因となる可能性があるため）
 
+  // ヘッダタイトルの省略表示とツールチップ用の関数
+  const MAX_HEADER_LENGTH = 14; // 最大表示文字数
+  
+  const truncateHeader = (text: string, maxLength: number): string => {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return text.substring(0, maxLength) + '...';
+  };
+
+  // ヘッダタイトル表示用のコンポーネント
+  const renderHeaderTitle = (displayName: string, sortIcon: React.ReactNode) => {
+    const truncatedName = truncateHeader(displayName, MAX_HEADER_LENGTH);
+    const needsTooltip = displayName.length > MAX_HEADER_LENGTH;
+    
+    const titleContent = (
+      <span>
+        {truncatedName}
+        {sortIcon}
+      </span>
+    );
+
+    if (needsTooltip) {
+      return (
+        <OverlayTrigger
+          placement="top"
+          overlay={<Tooltip id={`tooltip-${displayName}`}>{displayName}</Tooltip>}
+        >
+          {titleContent}
+        </OverlayTrigger>
+      );
+    }
+    
+    return titleContent;
+  };
+
   return (
     <Table striped className="patients">
       <thead>
@@ -257,14 +295,14 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                       style={{ cursor: 'pointer', userSelect: 'none' }}
                       onClick={() => handleSort(field)}
                     >
-                      {field.display_name}{getSortIcon(field)}
+                      {renderHeaderTitle(field.display_name, getSortIcon(field))}
                     </div>
                     <div style={{ borderTop: '1px solid #333', margin: '2px 0', width: '100%' }}></div>
                     <div 
                       style={{ cursor: 'pointer', userSelect: 'none' }}
                       onClick={() => handleSort(pairedField)}
                     >
-                      {pairedField.display_name}{getSortIcon(pairedField)}
+                      {renderHeaderTitle(pairedField.display_name, getSortIcon(pairedField))}
                     </div>
                   </div>
                 </th>
@@ -278,7 +316,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                 style={{ textAlign: 'left', cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort(field)}
               >
-                {field.display_name}{getSortIcon(field)}
+                {renderHeaderTitle(field.display_name, getSortIcon(field))}
               </th>
             );
           })}

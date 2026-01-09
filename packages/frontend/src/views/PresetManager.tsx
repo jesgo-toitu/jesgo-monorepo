@@ -327,14 +327,14 @@ const PresetManager = () => {
           >
             追加
           </Button>
-          <Button
+          {/*<Button
             bsStyle="info"
             className="normal-button"
             title="プリセットとドキュメントの連携テストを実行します"
             onClick={() => navigate('/PresetDocumentTest')}
           >
             連携テスト
-          </Button>
+          </Button>*/}
           <Button
             onClick={() => {
               if (editingCheck()) {

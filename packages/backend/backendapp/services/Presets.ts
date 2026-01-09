@@ -46,6 +46,8 @@ export interface PresetFieldData {
   display_name: string;
   field_path?: string;
   field_type?: string;
+  schema_path: number[];
+  property_path: string[];
   is_visible: boolean;
   is_csv_export: boolean;
   is_csv_header_display_name?: boolean;
@@ -262,6 +264,8 @@ const fieldsQuery = `
         pf.display_name,
         pf.field_path,
         pf.field_type,
+        pf.schema_path,
+        pf.property_path,
         pf.is_visible,
         pf.is_csv_export,
         pf.is_csv_header_display_name,
@@ -496,10 +500,10 @@ export const savePreset = async (presetData: PresetDetailData, req: any): Promis
       const fieldQuery = `
         INSERT INTO jesgo_preset_field (
           preset_id, schema_primary_id, schema_id, schema_id_string,
-          field_name, display_name, field_path, field_type, is_visible, is_csv_export,
+          field_name, display_name, field_path, field_type, schema_path, property_path, is_visible, is_csv_export,
           is_csv_header_display_name, is_fixed, display_order, schema_title, schema_version,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `;
       
       // 固定項目の場合はスキーマ関連情報を登録しない
@@ -521,6 +525,8 @@ export const savePreset = async (presetData: PresetDetailData, req: any): Promis
         field.display_name,
         fieldPath,
         fieldType,
+        field.schema_path,
+        field.property_path,
         field.is_visible,
         field.is_csv_export,
         isCsvHeaderDisplayName,
