@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { JSONSchema7, JSONSchema7Definition } from 'json-schema';
 import { GetSchemaInfo, GetSchemaIdFromString } from '../components/CaseRegistration/SchemaUtility';
 import { formatDateStr } from './CommonUtility';
 import {
@@ -270,12 +271,66 @@ export const getInitialTreatmentDate = (documents: DocumentContent[], getSchemaI
   return '';
 };
 
+/** JSONSchema7のkeyと値を全て取得 */
+export const getItemsAndNames = (item: JSONSchema7) => {
+  if (item === null) return { pItems: {}, pNames: [] };
+  const result = {
+    pItems: item as { [key: string]: JSONSchema7Definition },
+    pNames: Object.keys(item),
+  };
+  return result;
+};
+
+/**
+ *
+ * @param tagName 取得対象のjesgo:tagの内容
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const getPropertyNameFromTag = (
+  tagName: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  document: any,
+  schema: JSONSchema7
+): string | null => {
+  const schemaItems = getItemsAndNames(schema);
+  let retText = null;
+  for (let i = 0; i < schemaItems.pNames.length; i++) {
+    const prop = schemaItems.pItems[schemaItems.pNames[i]] as JSONSchema7;
+    // 該当プロパティがオブジェクトの場合、タグが付いてるかを確認
+    if (typeof prop === 'object') {
+      // タグが付いていれば値を取得する
+      if ((prop as any)['jesgo:tag'] && (prop as any)['jesgo:tag'] == tagName) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        const tempText = document[schemaItems.pNames[i]] as string | null;
+        if (tempText && tempText !== '') {
+          retText = tempText;
+        }
+      }
+      // タグがなければ中を再帰的に見に行く
+      else {
+        // ドキュメントが入れ子になっている場合、現在見ているプロパティネームの下にオブジェクトが存在すればそちらを新たなオブジェクトとして渡す
+        // eslint-disable-next-line
+        const newDocument = document[schemaItems.pNames[i]]
+          ? // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+            document[schemaItems.pNames[i]]
+          : document;
+        const ret = getPropertyNameFromTag(tagName, newDocument, prop);
+        if (ret !== null) {
+          retText = ret;
+        }
+      }
+    }
+    // オブジェクトでなければ中を見る必要無し
+  }
+  return retText;
+};
+
 /**
  * ステータス配列を取得（バックエンドのSearchPatient.tsと同じロジック）
  */
 export const getStatusArray = (documents: DocumentContent[], patient: PatientInfo): string[] => {
   const statusArray: string[] = [];
-  
+
   // 死亡ステータス
   if (patient.date_of_death) {
     statusArray.push(STATUS_STRINGS.DEATH);
@@ -296,40 +351,20 @@ export const getStatusArray = (documents: DocumentContent[], patient: PatientInf
       const iconTag: string[] = [];
       
       // 手術療法
-      if (schemaStr.includes('treatment_surgery')) {
-        const surgeryValue = doc.document['治療施行状況'] || doc.document['手術療法'] || '';
-        if (surgeryValue !== '') {
-          iconTag.push(STATUS_STRINGS.SURGERY);
-          
-          // 合併症の有無を確認
-          if (schemaStr.includes('surgigal_complications') || schemaStr.includes('complications')) {
-            const complicationsValue = doc.document['手術合併症'] || doc.document['合併症'] || '';
-            if (complicationsValue !== '') {
-              // 合併症の値が 'なし' でない場合のみ追加
-              if (complicationsValue !== 'なし') {
-                iconTag.push(STATUS_STRINGS.COMPLICATIONS);
-              }
-            }
-          }
+      if (schemaStr.includes('treatment_surgery') && (getPropertyNameFromTag('treatment_surgery', doc.document, docSchema) ?? '') !== '') {
+        iconTag.push(STATUS_STRINGS.SURGERY);
+        if (schemaStr.includes('has_complications') && (getPropertyNameFromTag('has_complications', doc.document, docSchema) ?? '') === 'あり') {
+          iconTag.push(STATUS_STRINGS.COMPLICATIONS);
         }
-      } else if (schemaStr.includes('treatment_chemo')) {
+      } else if (schemaStr.includes('treatment_chemo') && (getPropertyNameFromTag('treatment_chemo', doc.document, docSchema) ?? '') !== '') {
         // 化学療法（薬物療法）
-        const chemoValue = doc.document['治療施行状況'] || doc.document['化学療法'] || doc.document['薬物療法'] || '';
-        if (chemoValue !== '') {
-          iconTag.push(STATUS_STRINGS.CHEMO);
-        }
-      } else if (schemaStr.includes('treatment_radio')) {
+        iconTag.push(STATUS_STRINGS.CHEMO);
+      } else if (schemaStr.includes('treatment_radio') && (getPropertyNameFromTag('treatment_radio', doc.document, docSchema) ?? '') !== '') {
         // 放射線療法
-        const radioValue = doc.document['治療施行状況'] || doc.document['放射線療法'] || '';
-        if (radioValue !== '') {
-          iconTag.push(STATUS_STRINGS.RADIO);
-        }
-      } else if (schemaStr.includes('treatment_supportivecare')) {
+        iconTag.push(STATUS_STRINGS.RADIO);
+      } else if (schemaStr.includes('treatment_supportivecare') && (getPropertyNameFromTag('treatment_supportivecare', doc.document, docSchema) ?? '') !== '') {
         // 支持療法
-        const supportiveValue = doc.document['治療施行状況'] || doc.document['支持療法'] || '';
-        if (supportiveValue !== '') {
-          iconTag.push(STATUS_STRINGS.SUPPORTIVECARE);
-        }
+        iconTag.push(STATUS_STRINGS.SUPPORTIVECARE);
       }
       
       // アイコンタグをステータス配列に追加
@@ -338,21 +373,7 @@ export const getStatusArray = (documents: DocumentContent[], patient: PatientInf
       }
       
       // 再発
-      if (schemaStr.includes('recurrence')) {
-        const recurrenceValue = doc.document['再発'] || '';
-        if (recurrenceValue !== '') {
-          statusArray.push(STATUS_STRINGS.RECURRENCE);
-        }
-      }
-      
-      // エラー有無
-      if ('jesgo:error' in doc.document) {
-        const errorProperty = doc.document['jesgo:error'];
-        if (Array.isArray(errorProperty) && errorProperty.filter(item => item != null).length > 0) {
-          // エラー項目がある場合はhas_errorを追加
-          statusArray.push(STATUS_STRINGS.HAS_ERROR);
-        }
-      }
+      if (schemaStr.includes('recurrence')) { statusArray.push(STATUS_STRINGS.RECURRENCE); }
     } catch (error) {
       // エラーは無視して続行
     }
@@ -576,6 +597,7 @@ export const formatPatientRow = (
   presetFields: PresetField[],
   documents: DocumentContent[],
   getSchemaInfo: any,
+  selectedPresetId: string | null,
   includeInvisible?: boolean // CSV出力用に非表示項目も含めるかどうか
 ): any => {
   const row: any = {
@@ -622,7 +644,10 @@ export const formatPatientRow = (
         case FIXED_FIELD_NAMES.STATUS:
           // ステータスを取得（通常表示と同じロジック）
           // バックエンドから返されるstatus配列を優先して使用し、なければgetStatusArrayで計算
-          if (patient.status && Array.isArray(patient.status) && patient.status.length > 0) {
+          if (patient.status &&
+              Array.isArray(patient.status) &&
+              patient.status.length > 0 &&
+              (!selectedPresetId || Number(selectedPresetId) === 1)) {
             // バックエンドから返されるstatus配列を使用（通常表示と同じ）
             row[field.field_name] = patient.status;
           } else {

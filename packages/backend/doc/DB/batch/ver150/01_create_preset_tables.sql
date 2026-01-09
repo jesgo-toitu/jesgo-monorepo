@@ -35,7 +35,9 @@ CREATE TABLE jesgo_preset_field (
     field_name VARCHAR(200) NOT NULL,                -- 項目名（スキーマパス）
     display_name VARCHAR(100) NOT NULL,              -- 表示名（画面表示用）
     field_path VARCHAR(500),                         -- フィールドパス（例：/schema/CC/staging.治療施行状況）
-    field_type VARCHAR(50),                         -- 項目タイプ（例：patient_id, patient_name）
+    field_type VARCHAR(50),                          -- 項目タイプ（例：patient_id, patient_name）
+    schema_path INTEGER[],                           -- スキーマパス（例：1, 2, 3）
+    property_path TEXT[],                            -- プロパティパス（例：'術式の選択', '様式'）
     
     -- 表示制御
     is_visible BOOLEAN DEFAULT TRUE,                 -- 表示フラグ（一覧表示するか）
@@ -92,6 +94,8 @@ COMMENT ON COLUMN jesgo_preset_field.field_name IS '項目名（スキーマパ�
 COMMENT ON COLUMN jesgo_preset_field.display_name IS '表示名（画面表示用の項目名）';
 COMMENT ON COLUMN jesgo_preset_field.field_path IS 'フィールドパス（例：/schema/CC/staging.治療施行状況）';
 COMMENT ON COLUMN jesgo_preset_field.field_type IS '項目タイプ（例：patient_id, patient_name）';
+COMMENT ON COLUMN jesgo_preset_field.schema_path IS 'スキーマパス（例：1, 2, 3）';
+COMMENT ON COLUMN jesgo_preset_field.property_path IS 'プロパティパス（例：術式の選択, 様式）';
 COMMENT ON COLUMN jesgo_preset_field.is_visible IS '表示フラグ（一覧画面で表示するか）';
 COMMENT ON COLUMN jesgo_preset_field.is_csv_export IS 'CSV出力フラグ（CSVエクスポートに含めるか）';
 COMMENT ON COLUMN jesgo_preset_field.is_csv_header_display_name IS 'CSVヘッダを表示名にするフラグ（TRUEの場合、CSVヘッダにdisplay_nameを使用）';
@@ -167,6 +171,8 @@ SELECT
     pf.display_name,
     pf.field_path,
     pf.field_type,
+    pf.schema_path,
+    pf.property_path,
     
     -- 表示制御
     pf.is_visible,

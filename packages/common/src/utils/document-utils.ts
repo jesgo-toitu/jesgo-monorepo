@@ -93,7 +93,10 @@ export const getValueFromPath = (
     }
     
     const extractValue = options?.extractValue !== false; // デフォルトは true
-    
+
+    // 配列のインデックスは無視(先頭固定)
+    fieldPath = fieldPath.replace(/\[\d+\]/g, '');
+
     // fieldPathにドットがない場合は、直接プロパティとしてアクセス
     if (!fieldPath.includes('.')) {
       if (document && typeof document === 'object' && fieldPath in document) {
