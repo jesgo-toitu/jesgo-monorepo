@@ -11,6 +11,40 @@ import {
 import IconList from './IconList';
 import * as CommonConstants from '@jesgo/common';
 
+// 診断・進行期の複数値を改行で表示するためのヘルパー関数
+const formatMultiValueWithLineBreak = (value: any, fieldName: string): React.ReactNode => {
+  // 診断または進行期でない場合はそのまま返す
+  if (fieldName !== '診断' && fieldName !== '進行期') {
+    return value || '';
+  }
+  
+  // 値が文字列でない場合はそのまま返す
+  if (typeof value !== 'string') {
+    return value || '';
+  }
+  
+  // 診断の場合は「･」、進行期の場合は「・」で分割
+  const separator = fieldName === '診断' ? '･' : '・';
+  const values = value.split(separator).filter(v => v.trim() !== '');
+  
+  // 値が1つだけの場合はそのまま返す
+  if (values.length <= 1) {
+    return value || '';
+  }
+  
+  // 複数の値がある場合は改行で連結
+  return (
+    <>
+      {values.map((val, index) => (
+        <React.Fragment key={index}>
+          {val}
+          {index < values.length - 1 && <br />}
+        </React.Fragment>
+      ))}
+    </>
+  );
+};
+
 interface PresetPatientRow {
   [key: string]: any;
 }
@@ -375,7 +409,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                           ) : (isIcon || field.field_name === 'ステータス') && Array.isArray(value) ? (
                             <IconList iconList={value} displayCaption='' displayText='' />
                           ) : (
-                            <span>{value || ''}</span>
+                            <span>{formatMultiValueWithLineBreak(value, field.field_name)}</span>
                           )}
                         </div>
                         {/* 2項目目の値 */}
@@ -385,7 +419,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                           ) : (pairedIsIcon || (pairedField && pairedField.field_name === 'ステータス')) && Array.isArray(pairedValue) ? (
                             <IconList iconList={pairedValue} displayCaption='' displayText='' />
                           ) : (
-                            <span>{pairedValue || ''}</span>
+                            <span>{formatMultiValueWithLineBreak(pairedValue, pairedField.field_name)}</span>
                           )}
                         </div>
                       </div>
@@ -415,7 +449,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                 // 通常の項目の表示
                 return (
                   <td key={`${field.field_name}-${columnIndex}`}>
-                    {value || ''}
+                    {formatMultiValueWithLineBreak(value, field.field_name)}
                   </td>
                 );
               })}
