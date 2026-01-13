@@ -8,7 +8,7 @@ import {
   JSONSchema7Array,
 } from 'json-schema'; // eslint-disable-line import/no-unresolved
 import JSONPointer from 'jsonpointer';
-import lodash from 'lodash';
+import lodash, { cond } from 'lodash';
 import { Dispatch } from 'redux';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
 import { isNotEmptyObject } from '../../common/CaseRegistrationUtility';
@@ -16,6 +16,7 @@ import { formatDate, isDate } from '../../common/CommonUtility';
 import { Const } from '../../common/Const';
 import store from '../../store';
 import { JesgoDocumentSchema } from '../../store/schemaDataReducer';
+import { BreakfastDiningOutlined } from '@mui/icons-material';
 
 /** Schema加工用Utility */
 type schemaItem = {
@@ -412,50 +413,142 @@ const customSchemaIfThenElse = (
   formData: any
 ) => {
   const result = lodash.cloneDeep(schema);
-  if (allOfItem.if && allOfItem.then) {
+  // 切り替え条件のプロパティ
+  let matchFlg: boolean = false;
+  // ifにはelseだけというパターンも想定しておく(JSONschemaのマッチングでは否定が難しい)
+  if (allOfItem.if && (allOfItem.then || allOfItem.else)) {
     const rootSchemaItem = getPropItemsAndNames(result);
 
     // ifの確認
     const ifItem = getPropItemsAndNames(allOfItem.if as JSONSchema7);
-    // 切り替え条件のプロパティ
-    const matchFlgs: boolean[] = [];
-    ifItem.pNames.forEach((pName: string) => {
-      let matchFlg = false;
-      if (rootSchemaItem.pNames.includes(pName)) {
-        // ifの条件のプロパティが親のプロパティにある
-        const condValueMaps = ifItem.pItems[pName] as JSONSchema7;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const selectValue:
-          | string
-          | number
-          | boolean
-          | JSONSchema7Object
-          | JSONSchema7Array
-          | null = formData[pName]; // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-        const conditionValues = [];
-        let conditionPattern: RegExp | undefined;
-        if (condValueMaps.const) {
-          conditionValues.push(condValueMaps.const);
-        } else if (condValueMaps.enum) {
-          conditionValues.push(...condValueMaps.enum);
-        } else if (condValueMaps.pattern) {
-          conditionPattern = new RegExp(condValueMaps.pattern);
-        }
-        if (conditionPattern) {
-          // patternの場合
-          const value = (selectValue as string) ?? '';
-          if (value.match(conditionPattern)) {
-            matchFlg = true;
+
+    function checkCondition(condition: JSONSchema7, formData: any, depth: number = 10): boolean {
+      // 無限ループ防止
+      if (depth < 0) {
+        return false;
+      }
+
+      if (formData === undefined || formData === null) {
+        // 対象の内容が存在しない場合は不一致
+        return false;
+      }
+
+      // 条件ではないが：properties - オブジェクト内のプロパティを繰り下げて再帰的に検索
+      if (condition.properties !== undefined) {
+        if (typeof formData === 'object' && !Array.isArray(formData)) {
+          const childItems = getPropItemsAndNames(condition);
+          const childFormData = getPropItemsAndNames(formData);
+          for (let pName of childItems.pNames) {
+            if (childFormData.pNames.includes(pName)) {
+              if (checkCondition(childItems.pItems[pName] as JSONSchema7, childFormData.pItems[pName], depth - 1)) {
+                return true;
+              }
+            }
           }
-        } else if (conditionValues.includes(selectValue)) {
-          // const,enumの場合
-          matchFlg = true;
+        }
+      } else
+      // 対象：string, number, integer, boolean, (object)
+      // 条件：const, enum, pattern - 値の直接判定
+      if (condition.const !== undefined) {
+        if (formData == condition.const) {
+          return true;
+        }
+      } else if (condition.enum !== undefined) {
+        if (Array.isArray(condition.enum) && condition.enum.includes(formData)) {
+          return true;
+        }
+      } else if (condition.pattern !== undefined) {
+        const pattern = new RegExp(condition.pattern);
+        if (formData.toString().match(pattern)) {  
+          return true;
+        }
+      } else
+      // 対象：number, integer
+      // 条件：minimum, maximum, exclusiveMinimum, exclusiveMaximum - 値の範囲判定
+      if (condition.minimum !== undefined || condition.maximum !== undefined ||
+          condition.exclusiveMinimum !== undefined || condition.exclusiveMaximum !== undefined) { 
+        const numValue = Number(formData);
+        if (!isNaN(numValue)) {
+          let valid = true;
+          if (condition.minimum !== undefined) {
+            valid = valid && (numValue >= condition.minimum);
+          }
+          if (condition.maximum !== undefined) {
+            valid = valid && (numValue <= condition.maximum);
+          }
+          if (condition.exclusiveMinimum !== undefined) {
+            valid = valid && (numValue > condition.exclusiveMinimum);
+          }
+          if (condition.exclusiveMaximum !== undefined) {
+            valid = valid && (numValue < condition.exclusiveMaximum);
+          }
+          if (valid) {
+            return true;
+          }
+        }
+      } else
+      // 対象：array
+      // 条件：minItems, maxItems - 配列の要素数の判定
+      if (condition.minItems !== undefined || condition.maxItems !== undefined) {
+        if (Array.isArray(formData)) {
+          let valid = true;
+          if (condition.minItems !== undefined) {
+            valid = valid && (formData.length >= condition.minItems);
+          }
+          if (condition.maxItems !== undefined) {
+            valid = valid && (formData.length <= condition.maxItems);
+          }
+          if (valid) {
+            return true;
+          }
+        }
+      } else
+      // 対象：array
+      // 条件：contains - 配列内の値の判定（再帰的に確認が必要）
+      if (condition.contains !== undefined && Array.isArray(formData)) {
+        const containsConditionItems = getPropItemsAndNames(condition.contains as JSONSchema7);
+        if (containsConditionItems.pNames.length > 0) {
+          for (let pName of containsConditionItems.pNames) {
+            for (let formArrayItem of formData) {
+              if (formArrayItem[pName] === undefined) {
+                continue;
+              }
+              if (checkCondition(containsConditionItems.pItems[pName] as JSONSchema7, formArrayItem[pName], depth - 1)) {
+                return true;
+              }
+            }
+          }
         }
       }
-      matchFlgs.push(matchFlg);
-    });
+      return false;
+    }
 
-    if (!matchFlgs.includes(false)) {
+    for (let pName of ifItem.pNames) {
+      // 条件に指定されたプロパティがスキーマで規定されていなければ処理をスキップ
+      if (!rootSchemaItem.pNames.includes(pName)) {
+        continue;
+      }
+
+      // 条件指定を取得
+      const condValueMaps = ifItem.pItems[pName] as JSONSchema7;
+
+      // フォームの内容を取得
+      const selectValue:
+        | string
+        | number
+        | boolean
+        | JSONSchema7Object
+        | JSONSchema7Array
+        | null = formData[pName];
+
+      // 値を評価 - マッチが１つあれば十分
+      if (checkCondition(condValueMaps, selectValue, 10)) {
+        matchFlg = true;
+        break;
+      }
+    }
+
+    if (matchFlg && allOfItem.then) {
       // ifの条件に全て該当すればthenを適用
       mergeSchemaItem({
         targetSchema: result,
@@ -463,7 +556,7 @@ const customSchemaIfThenElse = (
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         formData,
       });
-    } else if (allOfItem.else) {
+    } else if (matchFlg !== false && allOfItem.else) {
       // それ以外はelseの適用（あれば）
       mergeSchemaItem({
         targetSchema: result,
