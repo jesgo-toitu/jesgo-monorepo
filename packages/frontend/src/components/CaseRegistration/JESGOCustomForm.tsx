@@ -92,12 +92,21 @@ const CustomDivForm = (props: CustomDivFormProp) => {
     }
   }, [parentEventDate]);
 
+  // 前回のformDataを保持するためのref（継承直後、データ入力判定を動かすために使用）
+  const previousFormDataForSetFormDataRef = useRef<any>(null);
+
   // 継承直後、データ入力判定を動かすためにsetFormDataする
   useEffect(() => {
-    if (JSON.stringify(copyProps.formData) !== JSON.stringify(formData)) {
+    const previousFormDataStr = previousFormDataForSetFormDataRef.current
+      ? JSON.stringify(previousFormDataForSetFormDataRef.current)
+      : null;
+    const currentFormDataStr = JSON.stringify(formData);
+    
+    if (previousFormDataStr !== currentFormDataStr) {
+      previousFormDataForSetFormDataRef.current = formData;
       setFormData(formData);
     }
-  }, [formData, copyProps.formData]);
+  }, [formData, setFormData]);
 
   copyProps.formData = formData;
 
