@@ -21,7 +21,6 @@ import {
 } from 'react-bootstrap';
 import { CSVLink } from 'react-csv';
 import { useDispatch } from 'react-redux';
-import axios from 'axios';
 import UserTables, { userDataList, userData } from '../components/Patients/UserTables';
 import PresetPatientTable from '../components/Patients/PresetPatientTable';
 import Pagination from '../components/Patients/Pagination';
@@ -47,7 +46,6 @@ import { LoadPluginList } from '../common/DBUtility';
 import store from '../store';
 import { PresetField, DocumentContent, PatientInfo, transformDocuments, formatPatientRow, convertToCsvFormat } from '../common/PresetPatientDisplay';
 import { GetSchemaInfo } from '../components/CaseRegistration/SchemaUtility';
-import { WebAppConfig } from '@jesgo/common';
 
 const UNIT_TYPE = {
   DAY: 0,
@@ -218,6 +216,7 @@ const Patients = () => {
   const [defaultPageSize, setDefaultPageSize] = useState<number>(50);
   const pageSizeOptions = [10, 25, 50, 100];
   const [totalCount, setTotalCount] = useState<number>(0);
+  const [presetPagenationPatientData, setPresetPagenationPatientData] = useState<any[]>([]);
   
   // ソート関連の状態（カスタム項目の場合は 'custom_${field_id}' 形式）
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -225,11 +224,11 @@ const Patients = () => {
 
   // プリセット項目の絞り込み条件の状態管理
   // field_idをキーとして、各項目の絞り込み条件を管理
-  // status型の場合、valueは各項目のチェック状態を管理するオブジェクト
+  // status型の場合、valueは選択されたステータスアイコンの配列（string[]）
   const [presetFilterConditions, setPresetFilterConditions] = useState<{
     [fieldId: number]: {
       enabled: boolean;
-      value: string | number | boolean | searchDateInfoDataSet | {
+      value: string | number | boolean | searchDateInfoDataSet | string[] | {
         advancedStage?: boolean;
         pathlogicalDiagnosis?: boolean;
         initialTreatment?: boolean;
@@ -283,6 +282,9 @@ const Patients = () => {
             const dateInfo = condition.value as searchDateInfoDataSet;
             const dateStrings = generateSearchDateInfoStrings(dateInfo);
             filterValue = JSON.stringify(dateStrings);
+          } else if (field.field_type === 'status') {
+            // status型の場合は、選択されたステータスアイコンの配列をJSON文字列として送信
+            filterValue = JSON.stringify(condition.value);
           } else if (field.field_type === 'boolean') {
             // bool型の場合は、チェックが有りの場合に"true"を送信
             filterValue = condition.value === true ? 'true' : 'false';
@@ -460,6 +462,15 @@ const Patients = () => {
   }, [currentPage, pageSize, sortColumn, sortDirection, selectedPresetId, selectedPresetDetail]);
 
   useEffect(() => {
+    // カスタムプリセットの場合、フロント側でページング
+    if (presetPatientData.length === 0 || Number(selectedPresetId) === 1) setPresetPagenationPatientData(presetPatientData);
+    else {
+      const startIndex = (currentPage - 1) * pageSize;
+      setPresetPagenationPatientData(presetPatientData.slice(startIndex, startIndex + pageSize));
+    }
+  }, [presetPatientData, currentPage, pageSize, sortColumn, sortDirection, selectedPresetId, selectedPresetDetail]);
+
+  useEffect(() => {
     const f = async () => {
       setIsLoading(true);
       await storeSchemaInfo(dispatch);
@@ -579,7 +590,10 @@ const Patients = () => {
     if (topMenuInfoForSearch) {
       const searchParam = new URLSearchParams(url);
 
-      const copySearchWord = lodash.cloneDeep(searchWord);
+      // 表示モードに応じて適切な状態を取得
+      const isDetailMode = topMenuInfoForSearch.isDetail;
+      const targetSearchWord = isDetailMode ? tumorRegistrySearchWord : normalSearchWord;
+      const copySearchWord = lodash.cloneDeep(targetSearchWord);
 
       // 検索条件の復元
 
@@ -633,7 +647,12 @@ const Patients = () => {
         copySearchWord.blankFields
       ).some((blankItem) => blankItem[1]);
 
-      setSearchWord(copySearchWord);
+      // 表示モードに応じて適切な状態を設定
+      if (isDetailMode) {
+        setTumorRegistrySearchWord(copySearchWord);
+      } else {
+        setNormalSearchWord(copySearchWord);
+      }
     }
 
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -744,50 +763,51 @@ const Patients = () => {
           
           // 全患者のドキュメントを一括取得
           const caseIds = patientList.map((p) => p.case_id);
-          const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds });
+          const isCsvExport = true;
+          const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds, selectedPresetId, isCsvExport });
           
           if (documentsResult.statusNum === RESULT.NORMAL_TERMINATION) {
             const casesData = documentsResult.body as any[];
             
             // case_idをキーにしたマップを作成
-            const documentsMap = new Map();
+            const documentsMap = new Map<number, Record<string, DocumentContent[]>>();
             for (const caseData of casesData) {
               const caseId = Number(caseData.jesgo_case.case_id);
-              const documents = transformDocuments(caseData.jesgo_document || []);
-              documentsMap.set(caseId, documents);
-              
-              // getCasesAndDocuments APIから取得したdate_of_deathをpatientオブジェクトに追加
+              const documentGroups: Record<string, any[]> = {};
+              for (const doc of caseData.jesgo_document) {
+                if (!documentGroups[doc.root_key]) documentGroups[doc.root_key] = [];
+                documentGroups[doc.root_key].push(doc);
+              }
+              for (const rootDocumentId of Object.keys(documentGroups)) {
+                if (!documentsMap.has(caseId)) documentsMap.set(caseId, {});
+                documentsMap.get(caseId)![rootDocumentId] = transformDocuments(documentGroups[rootDocumentId]);
+              }
               const patient = patientList.find(p => p.case_id === caseId);
               if (patient && caseData.jesgo_case.date_of_death) {
                 patient.date_of_death = caseData.jesgo_case.date_of_death;
               }
             }
-            
+
             // 各患者のCSVデータを生成
             for (const patient of patientList) {
               try {
-                const documents = documentsMap.get(patient.case_id) || [];
-                
-                // CSV出力用にformatPatientRowを再実行（is_csv_export=trueの全項目を含める）
-                // これにより、is_visible=falseだがis_csv_export=trueの項目も取得できる
-                const csvFormattedRow = formatPatientRow(
-                  patient,
-                  csvExportFields, // is_csv_export=trueの項目のみ
-                  documents,
-                  GetSchemaInfo,
-                  true // includeInvisible=trueでis_visibleをチェックしない
-                );
-                
-                // CSVデータの初期化（動的オブジェクト）
-                const patientCsv: any = {};
-                
-                // formatPatientRowの結果を使用し、convertToCsvFormatでCSV用に変換
-                for (const field of csvExportFields) {
-                  const csvFieldData = convertToCsvFormat(csvFormattedRow, field, documents, GetSchemaInfo);
-                  Object.assign(patientCsv, csvFieldData);
+                const documentGroups = documentsMap.get(patient.case_id);
+                if (documentGroups) {
+                  for (const rootDocumentId of Object.keys(documentGroups)) {
+                    const documents = documentGroups[rootDocumentId];
+                    const csvFormattedRow = formatPatientRow(patient, csvExportFields, documents, GetSchemaInfo, selectedPresetId, true);
+                    // CSVデータの初期化（動的オブジェクト）
+                    const patientCsv: any = {};
+                  
+                    // formatPatientRowの結果を使用し、convertToCsvFormatでCSV用に変換
+                    for (const field of csvExportFields) {
+                      const csvFieldData = convertToCsvFormat(csvFormattedRow, field, documents, GetSchemaInfo);
+                      Object.assign(patientCsv, csvFieldData);
+                    }
+                  
+                    newData.push(patientCsv);
+                  }
                 }
-                
-                newData.push(patientCsv);
               } catch (error) {
                 console.error(`患者 ${patient.case_id} のCSVデータ生成エラー:`, error);
               }
@@ -870,7 +890,26 @@ const Patients = () => {
     generateCsvData();
   }, [url, selectedPresetId, selectedPresetDetail]);
 
-  const [searchWord, setSearchWord] = useState(initialSearchWord);
+  // 患者リスト表示用のフィルタリング条件
+  const [normalSearchWord, setNormalSearchWord] = useState(initialSearchWord);
+  // 腫瘍登録管理表示用のフィルタリング条件
+  const [tumorRegistrySearchWord, setTumorRegistrySearchWord] = useState(initialSearchWord);
+  
+  // 現在の表示モードに応じたフィルタリング条件を取得するヘルパー関数
+  const getCurrentSearchWord = () => {
+    return search === 'table-cell' ? tumorRegistrySearchWord : normalSearchWord;
+  };
+  
+  const setCurrentSearchWord = (newValue: typeof initialSearchWord) => {
+    if (search === 'table-cell') {
+      setTumorRegistrySearchWord(newValue);
+    } else {
+      setNormalSearchWord(newValue);
+    }
+  };
+  
+  // 後方互換性のため、searchWordを定義（使用時はgetCurrentSearchWord()を使用）
+  const searchWord = getCurrentSearchWord();
 
   const setShowProgressAndRecurrence = (
     check: boolean,
@@ -912,93 +951,134 @@ const Patients = () => {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleSearchCondition = (event: any) => {
-    const eventTarget: EventTarget & HTMLInputElement =
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      event.target as EventTarget & HTMLInputElement;
+    // React BootstrapのCheckboxでは、event.targetが正しく取得できない場合があるため、
+    // 複数の方法で値を取得を試みる
+    let name: string | undefined;
+    let checked: boolean | undefined;
+    let value: string | undefined;
 
-    let blankFields = searchWord.blankFields;
+    // 方法1: event.targetから取得
+    if (event.target) {
+      const target = event.target as HTMLInputElement;
+      name = target.name;
+      checked = target.checked;
+      value = target.value;
+    }
 
-    switch (eventTarget.name) {
+    // 方法2: event.currentTargetから取得
+    if (!name && event.currentTarget) {
+      const currentTarget = event.currentTarget as HTMLInputElement;
+      name = currentTarget.name || name;
+      checked = currentTarget.checked !== undefined ? currentTarget.checked : checked;
+      value = currentTarget.value !== undefined ? currentTarget.value : value;
+    }
+
+    // 方法3: eventオブジェクトから直接取得
+    if (!name && event.name) {
+      name = event.name;
+    }
+    if (checked === undefined && event.checked !== undefined) {
+      checked = event.checked;
+    }
+    if (!value && event.value) {
+      value = event.value;
+    }
+
+    // デバッグ用（開発時のみ）
+    if (process.env.NODE_ENV === 'development') {
+      console.log('handleSearchCondition event:', { event, name, checked, value });
+    }
+
+    if (!name) {
+      console.warn('handleSearchCondition: name属性が取得できませんでした', event);
+      return;
+    }
+
+    const currentSearchWord = getCurrentSearchWord();
+    let blankFields = currentSearchWord.blankFields;
+
+    switch (name) {
       case 'cancerType':
-        setSearchWord({ ...searchWord, cancerType: eventTarget.value });
+        setCurrentSearchWord({ ...currentSearchWord, cancerType: value || 'all' });
         break;
 
       case 'showOnlyTumorRegistry':
-        setSearchWord({
-          ...searchWord,
-          showOnlyTumorRegistry: eventTarget.checked,
+        setCurrentSearchWord({
+          ...currentSearchWord,
+          showOnlyTumorRegistry: checked ?? false,
         });
         break;
 
       case 'checkOfDiagnosisDate':
-        setSearchWord({
-          ...searchWord,
-          checkOfDiagnosisDate: eventTarget.checked,
+        setCurrentSearchWord({
+          ...currentSearchWord,
+          checkOfDiagnosisDate: checked ?? false,
         });
         break;
 
       case 'checkOfEventDate':
-        setSearchWord({
-          ...searchWord,
-          checkOfEventDate: eventTarget.checked,
+        setCurrentSearchWord({
+          ...currentSearchWord,
+          checkOfEventDate: checked ?? false,
         });
         break;
 
       case 'checkOfBlankFields':
-        setSearchWord({
-          ...searchWord,
-          checkOfBlankFields: eventTarget.checked,
+        setCurrentSearchWord({
+          ...currentSearchWord,
+          checkOfBlankFields: checked ?? false,
         });
         break;
 
       case 'advancedStage':
-        blankFields = { ...blankFields, advancedStage: eventTarget.checked };
-        setSearchWord({ ...searchWord, blankFields });
+        blankFields = { ...blankFields, advancedStage: checked ?? false };
+        setCurrentSearchWord({ ...currentSearchWord, blankFields });
         break;
 
       case 'pathlogicalDiagnosis':
         blankFields = {
           ...blankFields,
-          pathlogicalDiagnosis: eventTarget.checked,
+          pathlogicalDiagnosis: checked ?? false,
         };
-        setSearchWord({ ...searchWord, blankFields });
+        setCurrentSearchWord({ ...currentSearchWord, blankFields });
         break;
 
       case 'initialTreatment':
         blankFields = {
           ...blankFields,
-          initialTreatment: eventTarget.checked,
+          initialTreatment: checked ?? false,
         };
-        setSearchWord({ ...searchWord, blankFields });
+        setCurrentSearchWord({ ...currentSearchWord, blankFields });
         break;
 
       case 'complications':
-        blankFields = { ...blankFields, complications: eventTarget.checked };
-        setSearchWord({ ...searchWord, blankFields });
+        blankFields = { ...blankFields, complications: checked ?? false };
+        setCurrentSearchWord({ ...currentSearchWord, blankFields });
         break;
 
       case 'threeYearPrognosis':
         blankFields = {
           ...blankFields,
-          threeYearPrognosis: eventTarget.checked,
+          threeYearPrognosis: checked ?? false,
         };
-        setSearchWord({ ...searchWord, blankFields });
+        setCurrentSearchWord({ ...currentSearchWord, blankFields });
         break;
 
       case 'fiveYearPrognosis':
         blankFields = {
           ...blankFields,
-          fiveYearPrognosis: eventTarget.checked,
+          fiveYearPrognosis: checked ?? false,
         };
-        setSearchWord({ ...searchWord, blankFields });
+        setCurrentSearchWord({ ...currentSearchWord, blankFields });
         break;
 
       case 'showProgressAndRecurrence':
-        setSearchWord({
-          ...searchWord,
-          showProgressAndRecurrence: eventTarget.checked,
+        const progressChecked = checked ?? false;
+        setCurrentSearchWord({
+          ...currentSearchWord,
+          showProgressAndRecurrence: progressChecked,
         });
-        setShowProgressAndRecurrence(eventTarget.checked, search);
+        setShowProgressAndRecurrence(progressChecked, search);
         break;
       default:
     }
@@ -1010,7 +1090,7 @@ const Patients = () => {
       setNoSearch('hidden');
       setSearch('table-cell');
       setShowProgressAndRecurrence(
-        searchWord.showProgressAndRecurrence,
+        tumorRegistrySearchWord.showProgressAndRecurrence,
         'table-cell'
       );
     } else {
@@ -1018,7 +1098,7 @@ const Patients = () => {
       setNoSearch('table-cell');
       setSearch('hidden');
       setShowProgressAndRecurrence(
-        searchWord.showProgressAndRecurrence,
+        normalSearchWord.showProgressAndRecurrence,
         'hidden'
       );
     }
@@ -1124,7 +1204,7 @@ const Patients = () => {
    * @returns 有効な場合true
    */
   const isValidFilterCondition = (
-    condition: { enabled: boolean; value: string | number | boolean | searchDateInfoDataSet | {
+    condition: { enabled: boolean; value: string | number | boolean | searchDateInfoDataSet | string[] | {
       advancedStage?: boolean;
       pathlogicalDiagnosis?: boolean;
       initialTreatment?: boolean;
@@ -1169,22 +1249,13 @@ const Patients = () => {
       }
     }
 
-    // status型の場合、オブジェクトで少なくとも1つの項目がtrueであることを確認
+    // status型の場合、配列で少なくとも1つのステータスアイコンが選択されていることを確認
     if (fieldType === 'status') {
-      if (typeof condition.value !== 'object' || condition.value === null || Array.isArray(condition.value)) {
+      if (!Array.isArray(condition.value) || condition.value.length === 0) {
         return false;
       }
-      const statusValue = condition.value as {
-        advancedStage?: boolean;
-        pathlogicalDiagnosis?: boolean;
-        initialTreatment?: boolean;
-        complications?: boolean;
-        threeYearPrognosis?: boolean;
-        fiveYearPrognosis?: boolean;
-      };
-      // 少なくとも1つの項目がtrueであることを確認
-      if (!statusValue.advancedStage && !statusValue.pathlogicalDiagnosis && !statusValue.initialTreatment && 
-          !statusValue.complications && !statusValue.threeYearPrognosis && !statusValue.fiveYearPrognosis) {
+      // 配列の各要素が文字列であることを確認
+      if (!condition.value.every((item: any) => typeof item === 'string')) {
         return false;
       }
     }
@@ -1244,7 +1315,10 @@ const Patients = () => {
     const diagnosisDate = generateSearchDateInfoStrings(
       searchDateInfoDiagnosis
     );
-    if (searchWord.checkOfDiagnosisDate) {
+    // 通常表示用のフィルタリング条件を使用
+    const currentSearchWord = normalSearchWord;
+    
+    if (currentSearchWord.checkOfDiagnosisDate) {
       if (hasSearchDateError('診断日', diagnosisDate)) {
         setIsLoading(false);
         return;
@@ -1253,7 +1327,7 @@ const Patients = () => {
 
     // イベント日
     const eventDate = generateSearchDateInfoStrings(searchDateInfoEventDate);
-    if (searchWord.checkOfEventDate) {
+    if (currentSearchWord.checkOfEventDate) {
       if (hasSearchDateError('イベント日', eventDate)) {
         setIsLoading(false);
         return;
@@ -1267,51 +1341,49 @@ const Patients = () => {
         JSON.stringify(initialTreatment)
       )}`;
       // がん腫
-      query += `&cancerType=${encodeURIComponent(searchWord.cancerType)}`;
+      query += `&cancerType=${encodeURIComponent(currentSearchWord.cancerType)}`;
       // 腫瘍登録対象のみ表示
       query += `&showOnlyTumorRegistry=${encodeURIComponent(
-        searchWord.showOnlyTumorRegistry
+        currentSearchWord.showOnlyTumorRegistry
       )}`;
 
-      if (type === 'detail') {
-        // 診断日
-        if (searchWord.checkOfDiagnosisDate) {
-          query += `&diagnosisDate=${encodeURIComponent(
-            JSON.stringify(diagnosisDate)
-          )}`;
-        }
+      // 診断日（詳細表示時のみ）
+      if (type === 'detail' && currentSearchWord.checkOfDiagnosisDate) {
+        query += `&diagnosisDate=${encodeURIComponent(
+          JSON.stringify(diagnosisDate)
+        )}`;
+      }
 
-        // イベント日
-        if (searchWord.checkOfEventDate) {
-          query += `&eventDateType=${encodeURIComponent(
-            searchDateEventDateType === '最新' ? '0' : '1'
-          )}`;
-          query += `&eventDate=${encodeURIComponent(
-            JSON.stringify(eventDate)
-          )}`;
-        }
+      // イベント日（詳細表示時のみ）
+      if (type === 'detail' && currentSearchWord.checkOfEventDate) {
+        query += `&eventDateType=${encodeURIComponent(
+          searchDateEventDateType === '最新' ? '0' : '1'
+        )}`;
+        query += `&eventDate=${encodeURIComponent(
+          JSON.stringify(eventDate)
+        )}`;
+      }
 
-        // 未入力項目で絞り込み
-        if (searchWord.checkOfBlankFields) {
-          query += `&advancedStage=${encodeURIComponent(
-            searchWord.blankFields.advancedStage
-          )}`;
-          query += `&pathlogicalDiagnosis=${encodeURIComponent(
-            searchWord.blankFields.pathlogicalDiagnosis
-          )}`;
-          query += `&initialTreatment=${encodeURIComponent(
-            searchWord.blankFields.initialTreatment
-          )}`;
-          query += `&complications=${encodeURIComponent(
-            searchWord.blankFields.complications
-          )}`;
-          query += `&threeYearPrognosis=${encodeURIComponent(
-            searchWord.blankFields.threeYearPrognosis
-          )}`;
-          query += `&fiveYearPrognosis=${encodeURIComponent(
-            searchWord.blankFields.fiveYearPrognosis
-          )}`;
-        }
+      // 未入力項目で絞り込み（通常表示・詳細表示の両方で使用可能）
+      if (currentSearchWord.checkOfBlankFields) {
+        query += `&advancedStage=${encodeURIComponent(
+          currentSearchWord.blankFields.advancedStage
+        )}`;
+        query += `&pathlogicalDiagnosis=${encodeURIComponent(
+          currentSearchWord.blankFields.pathlogicalDiagnosis
+        )}`;
+        query += `&initialTreatment=${encodeURIComponent(
+          currentSearchWord.blankFields.initialTreatment
+        )}`;
+        query += `&complications=${encodeURIComponent(
+          currentSearchWord.blankFields.complications
+        )}`;
+        query += `&threeYearPrognosis=${encodeURIComponent(
+          currentSearchWord.blankFields.threeYearPrognosis
+        )}`;
+        query += `&fiveYearPrognosis=${encodeURIComponent(
+          currentSearchWord.blankFields.fiveYearPrognosis
+        )}`;
       }
 
       return query;
@@ -1332,7 +1404,7 @@ const Patients = () => {
             const dateStrings = generateSearchDateInfoStrings(dateInfo);
             filterValue = JSON.stringify(dateStrings);
           } else if (field.field_type === 'status') {
-            // status型の場合は、各項目のチェック状態を含むオブジェクトをJSON文字列として送信
+            // status型の場合は、選択されたステータスアイコンの配列をJSON文字列として送信
             filterValue = JSON.stringify(condition.value);
           } else if (field.field_type === 'boolean') {
             // bool型の場合は、チェックが有りの場合に"true"を送信
@@ -1438,7 +1510,7 @@ const Patients = () => {
 
   // 検索条件のリセット
   const ResetSearchCondition = () => {
-    setSearchWord({ ...initialSearchWord });
+    setCurrentSearchWord({ ...initialSearchWord });
     setSearchDateInfoInitialTreatment(undefined);
     setSearchDateInfoDiagnosis(undefined);
     setSearchDateInfoEventDate(undefined);
@@ -1572,37 +1644,9 @@ const Patients = () => {
       );
       const eventDate = generateSearchDateInfoStrings(searchDateInfoEventDate);
       
-      // プリセット項目の絞り込み条件をリクエストボディで送信
-      const filterConditions: any[] = [];
-      if (selectedPresetDetail && selectedPresetDetail.fields) {
-        Object.entries(presetFilterConditions).forEach(([fieldId, condition]) => {
-          const field = selectedPresetDetail.fields.find((f: PresetField) => f.field_id === Number(fieldId));
-          if (field && isValidFilterCondition(condition, field.field_type)) {
-            let filterValue: string;
-            if (field.field_type === 'date') {
-              // 日付の場合はSearchDateComponentと同じ形式で送信
-              const dateInfo = condition.value as searchDateInfoDataSet;
-              const dateStrings = generateSearchDateInfoStrings(dateInfo);
-              filterValue = JSON.stringify(dateStrings);
-            } else if (field.field_type === 'status') {
-              // status型の場合は、各項目のチェック状態を含むオブジェクトをJSON文字列として送信
-              filterValue = JSON.stringify(condition.value);
-            } else if (field.field_type === 'boolean') {
-              // bool型の場合は、チェックが有りの場合に"true"を送信
-              filterValue = condition.value === true ? 'true' : 'false';
-            } else {
-              filterValue = String(condition.value);
-            }
-            filterConditions.push({
-              field_id: Number(fieldId),
-              field_name: field.field_name,
-              field_path: field.field_path,
-              field_type: field.field_type,
-              value: filterValue,
-            });
-          }
-        });
-      }
+      // 通常表示のフィルタリング処理を使用（プリセット項目のフィルタリング条件は使用しない）
+      // 腫瘍登録管理表示の場合は、腫瘍登録管理表示用のフィルタリング条件を使用
+      const currentSearchWord = isTumorRegistryMode ? tumorRegistrySearchWord : normalSearchWord;
       
       // URLSearchParamsを使用してクエリパラメータを構築
       const urlParams = new URLSearchParams();
@@ -1610,9 +1654,30 @@ const Patients = () => {
       // 初回治療開始日
       urlParams.set('initialTreatmentDate', JSON.stringify(initialTreatment));
       // がん種
-      urlParams.set('cancerType', searchWord.cancerType);
+      urlParams.set('cancerType', currentSearchWord.cancerType);
       // 腫瘍登録対象のみ表示
-      urlParams.set('showOnlyTumorRegistry', String(searchWord.showOnlyTumorRegistry));
+      urlParams.set('showOnlyTumorRegistry', String(currentSearchWord.showOnlyTumorRegistry));
+      
+      // 診断日
+      if (currentSearchWord.checkOfDiagnosisDate) {
+        urlParams.set('diagnosisDate', JSON.stringify(diagnosisDate));
+      }
+      
+      // イベント日
+      if (currentSearchWord.checkOfEventDate) {
+        urlParams.set('eventDateType', searchDateEventDateType === '最新' ? '0' : '1');
+        urlParams.set('eventDate', JSON.stringify(eventDate));
+      }
+      
+      // 未入力項目で絞り込み
+      if (currentSearchWord.checkOfBlankFields) {
+        urlParams.set('advancedStage', String(currentSearchWord.blankFields.advancedStage));
+        urlParams.set('pathlogicalDiagnosis', String(currentSearchWord.blankFields.pathlogicalDiagnosis));
+        urlParams.set('initialTreatment', String(currentSearchWord.blankFields.initialTreatment));
+        urlParams.set('complications', String(currentSearchWord.blankFields.complications));
+        urlParams.set('threeYearPrognosis', String(currentSearchWord.blankFields.threeYearPrognosis));
+        urlParams.set('fiveYearPrognosis', String(currentSearchWord.blankFields.fiveYearPrognosis));
+      }
       
       // ページング・ソートパラメータを追加
       urlParams.set('page', currentPage.toString());
@@ -1625,49 +1690,25 @@ const Patients = () => {
       setIsLoading(true);
       
       try {
-        // プリセット項目の絞り込み条件がある場合はPOSTリクエストで送信
-        if (filterConditions.length > 0) {
-          const requestBody = {
-            page: currentPage,
-            pageSize: pageSize,
-            sortColumn: sortColumn || undefined,
-            sortDirection: sortDirection || undefined,
-            presetFilters: filterConditions,
-          };
-          
-          const queryString = urlParams.toString();
-          const apiUrl = queryString ? `/patientlist?${queryString}` : '/patientlist';
-          const returnApiObject = await apiAccess(METHOD_TYPE.POST, apiUrl, requestBody);
-          
-          if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
-            const responseData = returnApiObject.body as any;
-            setUserListJson(JSON.stringify(responseData));
-            // 総件数を設定
-            if (responseData.totalCount !== undefined) {
-              setTotalCount(responseData.totalCount);
-            } else {
-              // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-              setTotalCount(responseData.data?.length || 0);
-            }
+        // 通常表示と同じようにGETリクエストで送信（プリセット項目のフィルタリング条件は使用しない）
+        const queryString = urlParams.toString();
+        const returnApiObject = await apiAccess(
+          METHOD_TYPE.GET,
+          `patientlist?${queryString}`
+        );
+        
+        if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
+          const responseBody = returnApiObject.body as { data: userData[]; totalCount?: number };
+          setUserListJson(JSON.stringify(responseBody));
+          // 総件数を設定
+          if (responseBody.totalCount !== undefined) {
+            setTotalCount(responseBody.totalCount);
           } else {
-            navigate('/login');
+            // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
+            setTotalCount(responseBody.data?.length || 0);
           }
         } else {
-          // プリセット項目の絞り込み条件がない場合はGETリクエストで送信
-          const queryString = urlParams.toString();
-          const returnApiObject = await apiAccess(
-            METHOD_TYPE.GET,
-            `patientlist?${queryString}`
-          );
-          
-          if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
-            setUserListJson(JSON.stringify(returnApiObject.body));
-            // 総件数を設定
-            const responseData = returnApiObject.body as userDataList;
-            setTotalCount(responseData.data?.length || 0);
-          } else {
-            navigate('/login');
-          }
+          navigate('/login');
         }
       } catch (error) {
         console.error('プリセット患者リスト取得エラー:', error);
@@ -1701,7 +1742,7 @@ const Patients = () => {
             const dateStrings = generateSearchDateInfoStrings(dateInfo);
             filterValue = JSON.stringify(dateStrings);
           } else if (field.field_type === 'status') {
-            // status型の場合は、各項目のチェック状態を含むオブジェクトをJSON文字列として送信
+            // status型の場合は、選択されたステータスアイコンの配列をJSON文字列として送信
             filterValue = JSON.stringify(condition.value);
           } else if (field.field_type === 'boolean') {
             // bool型の場合は、チェックが有りの場合に"true"を送信
@@ -1720,35 +1761,40 @@ const Patients = () => {
       });
       
       // 通常表示と同じ検索条件をURLパラメータとして追加
+      // プリセットモードの場合は通常表示用のフィルタリング条件を使用
+      const currentSearchWord = normalSearchWord;
+      
       // URLSearchParams.set()は自動的にエンコードするため、encodeURIComponentは不要
       const urlParams = new URLSearchParams();
       // 初回治療開始日
       urlParams.set('initialTreatmentDate', JSON.stringify(initialTreatment));
       // がん種
-      urlParams.set('cancerType', searchWord.cancerType);
+      urlParams.set('cancerType', currentSearchWord.cancerType);
       // 腫瘍登録対象のみ表示
-      urlParams.set('showOnlyTumorRegistry', String(searchWord.showOnlyTumorRegistry));
+      urlParams.set('showOnlyTumorRegistry', String(currentSearchWord.showOnlyTumorRegistry));
       
       // 診断日
-      if (searchWord.checkOfDiagnosisDate) {
+      if (currentSearchWord.checkOfDiagnosisDate) {
         urlParams.set('diagnosisDate', JSON.stringify(diagnosisDate));
       }
       
       // イベント日
-      if (searchWord.checkOfEventDate) {
+      if (currentSearchWord.checkOfEventDate) {
         urlParams.set('eventDateType', searchDateEventDateType === '最新' ? '0' : '1');
         urlParams.set('eventDate', JSON.stringify(eventDate));
       }
       
       // 未入力項目で絞り込み
-      if (searchWord.checkOfBlankFields) {
-        urlParams.set('advancedStage', String(searchWord.blankFields.advancedStage));
-        urlParams.set('pathlogicalDiagnosis', String(searchWord.blankFields.pathlogicalDiagnosis));
-        urlParams.set('initialTreatment', String(searchWord.blankFields.initialTreatment));
-        urlParams.set('complications', String(searchWord.blankFields.complications));
-        urlParams.set('threeYearPrognosis', String(searchWord.blankFields.threeYearPrognosis));
-        urlParams.set('fiveYearPrognosis', String(searchWord.blankFields.fiveYearPrognosis));
+      if (currentSearchWord.checkOfBlankFields) {
+        urlParams.set('advancedStage', String(currentSearchWord.blankFields.advancedStage));
+        urlParams.set('pathlogicalDiagnosis', String(currentSearchWord.blankFields.pathlogicalDiagnosis));
+        urlParams.set('initialTreatment', String(currentSearchWord.blankFields.initialTreatment));
+        urlParams.set('complications', String(currentSearchWord.blankFields.complications));
+        urlParams.set('threeYearPrognosis', String(currentSearchWord.blankFields.threeYearPrognosis));
+        urlParams.set('fiveYearPrognosis', String(currentSearchWord.blankFields.fiveYearPrognosis));
       }
+
+      const isCsvExport = false;
       
       // プリセット項目の絞り込み条件がある場合はPOSTリクエストで送信
       if (filterConditions.length > 0) {
@@ -1757,6 +1803,7 @@ const Patients = () => {
           pageSize: pageSize,
           sortColumn: sortColumn || undefined,
           sortDirection: sortDirection || undefined,
+          presetId: selectedPresetId || undefined,
           presetFilters: filterConditions,
         };
         
@@ -1788,23 +1835,34 @@ const Patients = () => {
               status: patient.status || []
             }));
           }
+
+          let filteredDocuments: number[][] = [];
+          if (responseData && responseData.filteredDocuments && Array.isArray(responseData.filteredDocuments)) filteredDocuments = responseData.filteredDocuments;
           
           // 全患者のドキュメントを一括取得
           const caseIds = patientList.map((p) => p.case_id);
-          const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds });
+          const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds, selectedPresetId, filteredDocuments, isCsvExport });
           
           // ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示を試みる
-          const documentsMap = new Map();
+          const documentsMap = new Map<number, Record<string, DocumentContent[]>>();
+
           if (documentsResult.statusNum === RESULT.NORMAL_TERMINATION) {
             const casesData = documentsResult.body as any[];
-            
-            // case_idをキーにしたマップを作成
             for (const caseData of casesData) {
               const caseId = Number(caseData.jesgo_case.case_id);
-              const documents = transformDocuments(caseData.jesgo_document || []);
-              documentsMap.set(caseId, documents);
-              
-              // getCasesAndDocuments APIから取得したdate_of_deathをpatientオブジェクトに追加
+              const documentGroups: Record<string, any[]> = {};
+              const documents = Array.isArray(caseData.jesgo_document) ? caseData.jesgo_document : [];
+              if (documents.length == 0) { documentGroups['0'] = []; }
+              else {
+                for (const document of documents) {
+                  if (!documentGroups[document.root_key]) documentGroups[document.root_key] = [];
+                  documentGroups[document.root_key].push(document);
+                }
+              }
+              for (const rootDocumentId of Object.keys(documentGroups)) {
+                if (!documentsMap.has(caseId)) documentsMap.set(caseId, {});
+                documentsMap.get(caseId)![rootDocumentId] = transformDocuments(documentGroups[rootDocumentId]);
+              }
               const patient = patientList.find(p => p.case_id === caseId);
               if (patient && caseData.jesgo_case.date_of_death) {
                 patient.date_of_death = caseData.jesgo_case.date_of_death;
@@ -1816,11 +1874,18 @@ const Patients = () => {
           }
           
           // 表示用データを作成（ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示）
-          let formattedData = patientList.map((patient) => {
-            const documents = documentsMap.get(patient.case_id) || [];
-            const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo);
-            return row;
-          }).filter(row => row !== null);
+          let formattedData = patientList.flatMap((patient) => {
+            const documentGroups = documentsMap.get(patient.case_id);
+            const rows = [];
+            if (documentGroups) {
+              for (const rootDocumentId of Object.keys(documentGroups)) {
+                const documents = documentGroups[rootDocumentId];
+                const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo, selectedPresetId);
+                if (row) rows.push(row);
+              }
+            }
+            return rows;
+          });
           
           // カスタム項目のソート処理（フロントエンドで実装）
           if (sortColumn && sortDirection && sortColumn.startsWith('custom_')) {
@@ -1839,7 +1904,8 @@ const Patients = () => {
               }
             }
           }
-          
+
+          setTotalCount(formattedData.length);
           setPresetPatientData(formattedData);
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
@@ -1852,6 +1918,9 @@ const Patients = () => {
         if (sortColumn && sortDirection) {
           urlParams.set('sortColumn', sortColumn);
           urlParams.set('sortDirection', sortDirection);
+        }
+        if (selectedPresetId) {
+          urlParams.set('presetId', selectedPresetId);
         }
         
         const queryString = urlParams.toString();
@@ -1885,20 +1954,27 @@ const Patients = () => {
           
           // 全患者のドキュメントを一括取得
           const caseIds = patientList.map((p) => p.case_id);
-          const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds });
+          const documentsResult = await apiAccess(METHOD_TYPE.POST, '/getCasesAndDocuments', { caseIds, selectedPresetId, isCsvExport });
           
           // ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示を試みる
-          const documentsMap = new Map();
+          const documentsMap = new Map<number, Record<string, DocumentContent[]>>();
           if (documentsResult.statusNum === RESULT.NORMAL_TERMINATION) {
             const casesData = documentsResult.body as any[];
-            
-            // case_idをキーにしたマップを作成
             for (const caseData of casesData) {
               const caseId = Number(caseData.jesgo_case.case_id);
-              const documents = transformDocuments(caseData.jesgo_document || []);
-              documentsMap.set(caseId, documents);
-              
-              // getCasesAndDocuments APIから取得したdate_of_deathをpatientオブジェクトに追加
+              const documentGroups: Record<string, any[]> = {};
+              const documents = Array.isArray(caseData.jesgo_document) ? caseData.jesgo_document : [];
+              if (documents.length == 0) { documentGroups['0'] = []; }
+              else {
+                for (const document of documents) {
+                  if (!documentGroups[document.root_key]) documentGroups[document.root_key] = [];
+                  documentGroups[document.root_key].push(document);
+                }
+              }
+              for (const rootDocumentId of Object.keys(documentGroups)) {
+                if (!documentsMap.has(caseId)) documentsMap.set(caseId, {});
+                documentsMap.get(caseId)![rootDocumentId] = transformDocuments(documentGroups[rootDocumentId]);
+              }
               const patient = patientList.find(p => p.case_id === caseId);
               if (patient && caseData.jesgo_case.date_of_death) {
                 patient.date_of_death = caseData.jesgo_case.date_of_death;
@@ -1910,11 +1986,18 @@ const Patients = () => {
           }
           
           // 表示用データを作成（ドキュメント取得に失敗した場合でも、空のドキュメント配列で表示）
-          let formattedData = patientList.map((patient) => {
-            const documents = documentsMap.get(patient.case_id) || [];
-            const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo);
-            return row;
-          }).filter(row => row !== null);
+          let formattedData = patientList.flatMap((patient) => {
+            const documentGroups = documentsMap.get(patient.case_id);
+            const rows = [];
+            if (documentGroups) {
+              for (const rootDocumentId of Object.keys(documentGroups)) {
+                const documents = documentGroups[rootDocumentId];
+                const row = formatPatientRow(patient, selectedPresetDetail.fields || [], documents, GetSchemaInfo, selectedPresetId);
+                if (row) rows.push(row);
+              }
+            }
+            return rows;
+          });
           
           // カスタム項目のソート処理（フロントエンドで実装）
           if (sortColumn && sortDirection && sortColumn.startsWith('custom_')) {
@@ -1933,7 +2016,8 @@ const Patients = () => {
               }
             }
           }
-          
+
+          setTotalCount(formattedData.length);
           setPresetPatientData(formattedData);
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
@@ -2038,14 +2122,14 @@ const Patients = () => {
                   <Glyphicon glyph="bookmark" />
                   プリセット
                 </Button>
-                <Button
+                {/*<Button
                   title={selectedPresetId ? "通常表示に切り替え" : "プリセット表示に切り替え"}
                   onClick={handleTogglePresetMode}
                   bsStyle={selectedPresetId ? "warning" : "success"}
                 >
                   <Glyphicon glyph={selectedPresetId ? "list" : "th-list"} />
                   {selectedPresetId ? "通常表示" : "プリセット表示"}
-                </Button>
+                </Button>*/}
               </ButtonGroup>
             </ButtonToolbar>
             <PatientListPluginButton
@@ -2118,7 +2202,14 @@ const Patients = () => {
               <div className="spacer10" />
               <Checkbox
                 name="showOnlyTumorRegistry"
-                onChange={handleSearchCondition}
+                onChange={(e: any) => {
+                  const currentSearchWord = getCurrentSearchWord();
+                  const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.showOnlyTumorRegistry;
+                  setCurrentSearchWord({
+                    ...currentSearchWord,
+                    showOnlyTumorRegistry: checked,
+                  });
+                }}
                 inline
                 checked={searchWord.showOnlyTumorRegistry}
               >
@@ -2133,6 +2224,136 @@ const Patients = () => {
                 </a>
               </div>
             </div>
+            {/* 未入力項目で絞り込み（患者リスト表示のみ表示） */}
+            {search !== 'table-cell' && (
+              <div className="flex">
+                <div className="flex-wrap">
+                  <Checkbox
+                    name="checkOfBlankFields"
+                    onChange={(e: any) => {
+                      const currentSearchWord = getCurrentSearchWord();
+                      const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.checkOfBlankFields;
+                      setCurrentSearchWord({
+                        ...currentSearchWord,
+                        checkOfBlankFields: checked,
+                      });
+                    }}
+                    inline
+                    checked={searchWord.checkOfBlankFields}
+                  >
+                    未入力項目で絞り込み：
+                  </Checkbox>
+                  <Checkbox
+                    name="advancedStage"
+                    onChange={(e: any) => {
+                      const currentSearchWord = getCurrentSearchWord();
+                      const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.advancedStage;
+                      setCurrentSearchWord({
+                        ...currentSearchWord,
+                        blankFields: {
+                          ...currentSearchWord.blankFields,
+                          advancedStage: checked,
+                        },
+                      });
+                    }}
+                    inline
+                    checked={searchWord.blankFields.advancedStage}
+                  >
+                    進行期
+                  </Checkbox>
+                  <Checkbox
+                    name="pathlogicalDiagnosis"
+                    onChange={(e: any) => {
+                      const currentSearchWord = getCurrentSearchWord();
+                      const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.pathlogicalDiagnosis;
+                      setCurrentSearchWord({
+                        ...currentSearchWord,
+                        blankFields: {
+                          ...currentSearchWord.blankFields,
+                          pathlogicalDiagnosis: checked,
+                        },
+                      });
+                    }}
+                    inline
+                    checked={searchWord.blankFields.pathlogicalDiagnosis}
+                  >
+                    診断
+                  </Checkbox>
+                  <Checkbox
+                    name="initialTreatment"
+                    onChange={(e: any) => {
+                      const currentSearchWord = getCurrentSearchWord();
+                      const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.initialTreatment;
+                      setCurrentSearchWord({
+                        ...currentSearchWord,
+                        blankFields: {
+                          ...currentSearchWord.blankFields,
+                          initialTreatment: checked,
+                        },
+                      });
+                    }}
+                    inline
+                    checked={searchWord.blankFields.initialTreatment}
+                  >
+                    初回治療
+                  </Checkbox>
+                  <Checkbox
+                    name="complications"
+                    onChange={(e: any) => {
+                      const currentSearchWord = getCurrentSearchWord();
+                      const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.complications;
+                      setCurrentSearchWord({
+                        ...currentSearchWord,
+                        blankFields: {
+                          ...currentSearchWord.blankFields,
+                          complications: checked,
+                        },
+                      });
+                    }}
+                    inline
+                    checked={searchWord.blankFields.complications}
+                  >
+                    合併症
+                  </Checkbox>
+                  <Checkbox
+                    name="threeYearPrognosis"
+                    onChange={(e: any) => {
+                      const currentSearchWord = getCurrentSearchWord();
+                      const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.threeYearPrognosis;
+                      setCurrentSearchWord({
+                        ...currentSearchWord,
+                        blankFields: {
+                          ...currentSearchWord.blankFields,
+                          threeYearPrognosis: checked,
+                        },
+                      });
+                    }}
+                    inline
+                    checked={searchWord.blankFields.threeYearPrognosis}
+                  >
+                    3年予後
+                  </Checkbox>
+                  <Checkbox
+                    name="fiveYearPrognosis"
+                    onChange={(e: any) => {
+                      const currentSearchWord = getCurrentSearchWord();
+                      const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.fiveYearPrognosis;
+                      setCurrentSearchWord({
+                        ...currentSearchWord,
+                        blankFields: {
+                          ...currentSearchWord.blankFields,
+                          fiveYearPrognosis: checked,
+                        },
+                      });
+                    }}
+                    inline
+                    checked={searchWord.blankFields.fiveYearPrognosis}
+                  >
+                    5年予後
+                  </Checkbox>
+                </div>
+              </div>
+            )}
             <div className={simpleSearchButtons}>
               <a href="#" onClick={() => changeView('detailSearch')}>
                 <span
@@ -2168,8 +2389,206 @@ const Patients = () => {
                 />
                 <span className="detail-setting-text">詳細表示設定：</span>
               </div>
-              {/* プリセット項目の絞り込み条件 */}
-              {selectedPresetDetail && selectedPresetDetail.fields && (
+              {/* 腫瘍登録管理表示の場合は通常表示のフィルタリング条件を表示 */}
+              {search === 'table-cell' ? (
+                <>
+                  {/* 診断日 */}
+                  <div className="detail-column">
+                    <Checkbox
+                      name="checkOfDiagnosisDate"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.checkOfDiagnosisDate;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          checkOfDiagnosisDate: checked,
+                        });
+                      }}
+                      inline
+                      checked={searchWord.checkOfDiagnosisDate}
+                    >
+                      <span className="detail-setting-content">診断日：</span>
+                    </Checkbox>
+                    <SearchDateComponent
+                      ctrlId="diagnosisDate"
+                      searchValue={searchDateInfoDiagnosis}
+                      setSearchDateInfoDataSet={setSearchDateInfoDiagnosis}
+                    />
+                  </div>
+                  {/* イベント日 */}
+                  <div className="detail-column">
+                    <Checkbox
+                      name="checkOfEventDate"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.checkOfEventDate;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          checkOfEventDate: checked,
+                        });
+                      }}
+                      inline
+                      checked={searchWord.checkOfEventDate}
+                    >
+                      <span className="detail-setting-content">
+                        イベント日【
+                        <Radio
+                          name="eventDateType"
+                          value="最新"
+                          checked={searchDateEventDateType === '最新'}
+                          onChange={onChangeEventDateType}
+                          inline
+                        >
+                          最新
+                        </Radio>
+                        <Radio
+                          name="eventDateType"
+                          value="全て"
+                          checked={searchDateEventDateType === '全て'}
+                          onChange={onChangeEventDateType}
+                          inline
+                        >
+                          全て
+                        </Radio>
+                        】：
+                      </span>
+                    </Checkbox>
+                    <SearchDateComponent
+                      ctrlId="eventDate"
+                      searchValue={searchDateInfoEventDate}
+                      setSearchDateInfoDataSet={setSearchDateInfoEventDate}
+                    />
+                  </div>
+                  {/* 未入力項目で絞り込み */}
+                  <div className="detail-column">
+                    <Checkbox
+                      name="checkOfBlankFields"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.checkOfBlankFields;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          checkOfBlankFields: checked,
+                        });
+                      }}
+                      inline
+                      checked={searchWord.checkOfBlankFields}
+                    >
+                      <span className="detail-setting-content">未入力項目で絞り込み：</span>
+                    </Checkbox>
+                    <Checkbox
+                      name="advancedStage"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.advancedStage;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          blankFields: {
+                            ...currentSearchWord.blankFields,
+                            advancedStage: checked,
+                          },
+                        });
+                      }}
+                      inline
+                      checked={searchWord.blankFields.advancedStage}
+                    >
+                      進行期
+                    </Checkbox>
+                    <Checkbox
+                      name="pathlogicalDiagnosis"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.pathlogicalDiagnosis;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          blankFields: {
+                            ...currentSearchWord.blankFields,
+                            pathlogicalDiagnosis: checked,
+                          },
+                        });
+                      }}
+                      inline
+                      checked={searchWord.blankFields.pathlogicalDiagnosis}
+                    >
+                      診断
+                    </Checkbox>
+                    <Checkbox
+                      name="initialTreatment"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.initialTreatment;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          blankFields: {
+                            ...currentSearchWord.blankFields,
+                            initialTreatment: checked,
+                          },
+                        });
+                      }}
+                      inline
+                      checked={searchWord.blankFields.initialTreatment}
+                    >
+                      初回治療
+                    </Checkbox>
+                    <Checkbox
+                      name="complications"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.complications;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          blankFields: {
+                            ...currentSearchWord.blankFields,
+                            complications: checked,
+                          },
+                        });
+                      }}
+                      inline
+                      checked={searchWord.blankFields.complications}
+                    >
+                      合併症
+                    </Checkbox>
+                    <Checkbox
+                      name="threeYearPrognosis"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.threeYearPrognosis;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          blankFields: {
+                            ...currentSearchWord.blankFields,
+                            threeYearPrognosis: checked,
+                          },
+                        });
+                      }}
+                      inline
+                      checked={searchWord.blankFields.threeYearPrognosis}
+                    >
+                      3年予後
+                    </Checkbox>
+                    <Checkbox
+                      name="fiveYearPrognosis"
+                      onChange={(e: any) => {
+                        const currentSearchWord = getCurrentSearchWord();
+                        const checked = e?.target?.checked ?? e?.checked ?? !currentSearchWord.blankFields.fiveYearPrognosis;
+                        setCurrentSearchWord({
+                          ...currentSearchWord,
+                          blankFields: {
+                            ...currentSearchWord.blankFields,
+                            fiveYearPrognosis: checked,
+                          },
+                        });
+                      }}
+                      inline
+                      checked={searchWord.blankFields.fiveYearPrognosis}
+                    >
+                      5年予後
+                    </Checkbox>
+                  </div>
+                </>
+              ) : (
+                /* 患者リスト表示の場合はプリセット項目の絞り込み条件を表示 */
+                selectedPresetDetail && selectedPresetDetail.fields && (
                 <>
                   {selectedPresetDetail.fields
                     .filter((field: PresetField) => field.is_visible)
@@ -2247,126 +2666,64 @@ const Patients = () => {
                           )}
                           {field.field_type === 'status' && (
                             <>
-                              <Checkbox
-                                name={`preset-status-${fieldId}-advancedStage`}
-                                checked={typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'advancedStage' in condition.value ? (condition.value as any).advancedStage : false}
-                                onChange={(e: any) => {
-                                  const currentValue = typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'advancedStage' in condition.value ? condition.value as any : {};
-                                  setPresetFilterConditions({
-                                    ...presetFilterConditions,
-                                    [fieldId]: {
-                                      enabled: condition.enabled,
-                                      value: {
-                                        ...currentValue,
-                                        advancedStage: e.target.checked,
-                                      },
-                                    },
-                                  });
-                                }}
-                                inline
-                              >
-                                進行期
-                              </Checkbox>
-                              <Checkbox
-                                name={`preset-status-${fieldId}-pathlogicalDiagnosis`}
-                                checked={typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'pathlogicalDiagnosis' in condition.value ? (condition.value as any).pathlogicalDiagnosis : false}
-                                onChange={(e: any) => {
-                                  const currentValue = typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'pathlogicalDiagnosis' in condition.value ? condition.value as any : {};
-                                  setPresetFilterConditions({
-                                    ...presetFilterConditions,
-                                    [fieldId]: {
-                                      enabled: condition.enabled,
-                                      value: {
-                                        ...currentValue,
-                                        pathlogicalDiagnosis: e.target.checked,
-                                      },
-                                    },
-                                  });
-                                }}
-                                inline
-                              >
-                                診断
-                              </Checkbox>
-                              <Checkbox
-                                name={`preset-status-${fieldId}-initialTreatment`}
-                                checked={typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'initialTreatment' in condition.value ? (condition.value as any).initialTreatment : false}
-                                onChange={(e: any) => {
-                                  const currentValue = typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'initialTreatment' in condition.value ? condition.value as any : {};
-                                  setPresetFilterConditions({
-                                    ...presetFilterConditions,
-                                    [fieldId]: {
-                                      enabled: condition.enabled,
-                                      value: {
-                                        ...currentValue,
-                                        initialTreatment: e.target.checked,
-                                      },
-                                    },
-                                  });
-                                }}
-                                inline
-                              >
-                                初回治療
-                              </Checkbox>
-                              <Checkbox
-                                name={`preset-status-${fieldId}-complications`}
-                                checked={typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'complications' in condition.value ? (condition.value as any).complications : false}
-                                onChange={(e: any) => {
-                                  const currentValue = typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'complications' in condition.value ? condition.value as any : {};
-                                  setPresetFilterConditions({
-                                    ...presetFilterConditions,
-                                    [fieldId]: {
-                                      enabled: condition.enabled,
-                                      value: {
-                                        ...currentValue,
-                                        complications: e.target.checked,
-                                      },
-                                    },
-                                  });
-                                }}
-                                inline
-                              >
-                                合併症
-                              </Checkbox>
-                              <Checkbox
-                                name={`preset-status-${fieldId}-threeYearPrognosis`}
-                                checked={typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'threeYearPrognosis' in condition.value ? (condition.value as any).threeYearPrognosis : false}
-                                onChange={(e: any) => {
-                                  const currentValue = typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'threeYearPrognosis' in condition.value ? condition.value as any : {};
-                                  setPresetFilterConditions({
-                                    ...presetFilterConditions,
-                                    [fieldId]: {
-                                      enabled: condition.enabled,
-                                      value: {
-                                        ...currentValue,
-                                        threeYearPrognosis: e.target.checked,
-                                      },
-                                    },
-                                  });
-                                }}
-                                inline
-                              >
-                                3年予後
-                              </Checkbox>
-                              <Checkbox
-                                name={`preset-status-${fieldId}-fiveYearPrognosis`}
-                                checked={typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'fiveYearPrognosis' in condition.value ? (condition.value as any).fiveYearPrognosis : false}
-                                onChange={(e: any) => {
-                                  const currentValue = typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value) && 'fiveYearPrognosis' in condition.value ? condition.value as any : {};
-                                  setPresetFilterConditions({
-                                    ...presetFilterConditions,
-                                    [fieldId]: {
-                                      enabled: condition.enabled,
-                                      value: {
-                                        ...currentValue,
-                                        fiveYearPrognosis: e.target.checked,
-                                      },
-                                    },
-                                  });
-                                }}
-                                inline
-                              >
-                                5年予後
-                              </Checkbox>
+                              {/* ステータスアイコンの定義（IconList.tsxと同じ順序） */}
+                              {[
+                                { key: 'surgery', caption: '手術療法' },
+                                { key: 'chemo', caption: '化学療法' },
+                                { key: 'radio', caption: '放射線療法' },
+                                { key: 'supportivecare', caption: '緩和療法' },
+                                { key: 'complications', caption: '合併症' },
+                                { key: 'recurrence', caption: '再発' },
+                                { key: 'death', caption: '死亡' }
+                              ].map((statusIcon) => {
+                                // 現在のvalueが配列の場合はそのまま使用、オブジェクトの場合は空配列、それ以外も空配列
+                                const currentStatusArray = Array.isArray(condition.value) 
+                                  ? condition.value 
+                                  : (typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value))
+                                    ? []
+                                    : [];
+                                const isSelected = currentStatusArray.includes(statusIcon.key);
+                                
+                                return (
+                                  <span
+                                    key={`preset-status-${fieldId}-${statusIcon.key}`}
+                                    onClick={() => {
+                                      const currentStatusArray = Array.isArray(condition.value) 
+                                        ? condition.value 
+                                        : (typeof condition.value === 'object' && condition.value !== null && !Array.isArray(condition.value))
+                                          ? []
+                                          : [];
+                                      const newStatusArray = isSelected
+                                        ? currentStatusArray.filter((s: string) => s !== statusIcon.key)
+                                        : [...currentStatusArray, statusIcon.key];
+                                      
+                                      setPresetFilterConditions({
+                                        ...presetFilterConditions,
+                                        [fieldId]: {
+                                          enabled: condition.enabled,
+                                          value: newStatusArray.length > 0 ? newStatusArray : [],
+                                        },
+                                      });
+                                    }}
+                                    style={{
+                                      cursor: 'pointer',
+                                      opacity: isSelected ? 1 : 0.3,
+                                      marginRight: '5px',
+                                      display: 'inline-block',
+                                      border: isSelected ? '2px solid #337ab7' : '2px solid transparent',
+                                      borderRadius: '3px',
+                                      padding: '2px',
+                                    }}
+                                    title={statusIcon.caption}
+                                  >
+                                    <img
+                                      src={`./image/icon_${statusIcon.key}.svg`}
+                                      alt={statusIcon.caption}
+                                      style={{ width: '20px', height: '20px' }}
+                                    />
+                                  </span>
+                                );
+                              })}
                             </>
                           )}
                           {field.field_type === 'boolean' && (
@@ -2398,6 +2755,7 @@ const Patients = () => {
                       );
                     })}
                 </>
+                )
               )}
               <div className="detail-column flex-right">
                 <Button
@@ -2425,7 +2783,7 @@ const Patients = () => {
           ) : selectedPresetId && selectedPresetDetail && search !== 'table-cell' ? (
             <>
               <PresetPatientTable
-                patientData={presetPatientData}
+                patientData={presetPagenationPatientData}
                 presetFields={selectedPresetDetail.fields || []}
                 currentPage={currentPage}
                 pageSize={pageSize}

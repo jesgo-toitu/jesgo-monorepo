@@ -16,6 +16,7 @@ export type treeSchema = {
 
 export type treeApiObject = {
   treeSchema: treeSchema[];
+  commonTreeSchema: treeSchema[];
   errorMessages: string[];
 };
 

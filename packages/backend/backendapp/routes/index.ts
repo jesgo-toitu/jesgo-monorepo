@@ -604,6 +604,7 @@ router.post('/patientlist', async (req, res, next) => {
         pageSize: body.pageSize?.toString() || queryParams.pageSize || undefined,
         sortColumn: body.sortColumn || queryParams.sortColumn || undefined,
         sortDirection: body.sortDirection || queryParams.sortDirection || undefined,
+        presetId: body.presetId || undefined,
         // POSTリクエストボディの場合は配列のまま、クエリパラメータの場合は文字列のまま
         presetFilters: body.presetFilters ? (body.presetFilters as any) : queryParams.presetFilters || undefined,
       };
@@ -762,8 +763,11 @@ router.post('/getCasesAndDocuments', async (req, res, next) => {
       });
       return;
     }
-    getCasesAndDocuments(caseIds)
-      .then((result) => res.status(200).send(result))
+    getCasesAndDocuments(
+      caseIds, req.body.selectedPresetId as number | null,
+      req.body.filteredDocuments as number[][] ?? [],
+      req.body.isCsvExport as boolean
+    ).then((result) => res.status(200).send(result))
       .catch(next);
   } else {
     logging(

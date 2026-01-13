@@ -5,9 +5,45 @@ import {
   ButtonGroup,
   ButtonToolbar,
   Glyphicon,
+  OverlayTrigger,
+  Tooltip,
 } from 'react-bootstrap';
 import IconList from './IconList';
 import * as CommonConstants from '@jesgo/common';
+
+// 診断・進行期の複数値を改行で表示するためのヘルパー関数
+const formatMultiValueWithLineBreak = (value: any, fieldName: string): React.ReactNode => {
+  // 診断または進行期でない場合はそのまま返す
+  if (fieldName !== '診断' && fieldName !== '進行期') {
+    return value || '';
+  }
+  
+  // 値が文字列でない場合はそのまま返す
+  if (typeof value !== 'string') {
+    return value || '';
+  }
+  
+  // 診断の場合は「･」、進行期の場合は「・」で分割
+  const separator = fieldName === '診断' ? '･' : '・';
+  const values = value.split(separator).filter(v => v.trim() !== '');
+  
+  // 値が1つだけの場合はそのまま返す
+  if (values.length <= 1) {
+    return value || '';
+  }
+  
+  // 複数の値がある場合は改行で連結
+  return (
+    <>
+      {values.map((val, index) => (
+        <React.Fragment key={index}>
+          {val}
+          {index < values.length - 1 && <br />}
+        </React.Fragment>
+      ))}
+    </>
+  );
+};
 
 interface PresetPatientRow {
   [key: string]: any;
@@ -234,6 +270,42 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
 
   // デバッグログは削除（無限ループの原因となる可能性があるため）
 
+  // ヘッダタイトルの省略表示とツールチップ用の関数
+  const MAX_HEADER_LENGTH = 14; // 最大表示文字数
+  
+  const truncateHeader = (text: string, maxLength: number): string => {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return text.substring(0, maxLength) + '...';
+  };
+
+  // ヘッダタイトル表示用のコンポーネント
+  const renderHeaderTitle = (displayName: string, sortIcon: React.ReactNode) => {
+    const truncatedName = truncateHeader(displayName, MAX_HEADER_LENGTH);
+    const needsTooltip = displayName.length > MAX_HEADER_LENGTH;
+    
+    const titleContent = (
+      <span>
+        {truncatedName}
+        {sortIcon}
+      </span>
+    );
+
+    if (needsTooltip) {
+      return (
+        <OverlayTrigger
+          placement="top"
+          overlay={<Tooltip id={`tooltip-${displayName}`}>{displayName}</Tooltip>}
+        >
+          {titleContent}
+        </OverlayTrigger>
+      );
+    }
+    
+    return titleContent;
+  };
+
   return (
     <Table striped className="patients">
       <thead>
@@ -257,14 +329,14 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                       style={{ cursor: 'pointer', userSelect: 'none' }}
                       onClick={() => handleSort(field)}
                     >
-                      {field.display_name}{getSortIcon(field)}
+                      {renderHeaderTitle(field.display_name, getSortIcon(field))}
                     </div>
                     <div style={{ borderTop: '1px solid #333', margin: '2px 0', width: '100%' }}></div>
                     <div 
                       style={{ cursor: 'pointer', userSelect: 'none' }}
                       onClick={() => handleSort(pairedField)}
                     >
-                      {pairedField.display_name}{getSortIcon(pairedField)}
+                      {renderHeaderTitle(pairedField.display_name, getSortIcon(pairedField))}
                     </div>
                   </div>
                 </th>
@@ -278,7 +350,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                 style={{ textAlign: 'left', cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort(field)}
               >
-                {field.display_name}{getSortIcon(field)}
+                {renderHeaderTitle(field.display_name, getSortIcon(field))}
               </th>
             );
           })}
@@ -337,7 +409,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                           ) : (isIcon || field.field_name === 'ステータス') && Array.isArray(value) ? (
                             <IconList iconList={value} displayCaption='' displayText='' />
                           ) : (
-                            <span>{value || ''}</span>
+                            <span>{formatMultiValueWithLineBreak(value, field.field_name)}</span>
                           )}
                         </div>
                         {/* 2項目目の値 */}
@@ -347,7 +419,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                           ) : (pairedIsIcon || (pairedField && pairedField.field_name === 'ステータス')) && Array.isArray(pairedValue) ? (
                             <IconList iconList={pairedValue} displayCaption='' displayText='' />
                           ) : (
-                            <span>{pairedValue || ''}</span>
+                            <span>{formatMultiValueWithLineBreak(pairedValue, pairedField.field_name)}</span>
                           )}
                         </div>
                       </div>
@@ -377,7 +449,7 @@ const PresetPatientTableComponent: React.FC<PresetPatientTableProps> = ({
                 // 通常の項目の表示
                 return (
                   <td key={`${field.field_name}-${columnIndex}`}>
-                    {value || ''}
+                    {formatMultiValueWithLineBreak(value, field.field_name)}
                   </td>
                 );
               })}

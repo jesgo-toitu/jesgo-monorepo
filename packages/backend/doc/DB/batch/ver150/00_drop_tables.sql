@@ -42,6 +42,10 @@ DROP TABLE IF EXISTS jesgo_fixed_field CASCADE;
 -- 他のテーブルで使用されていない場合のみ削除してください
 -- 使用されている場合は、この行をコメントアウトしてください
 DROP FUNCTION IF EXISTS update_preset_field_schema_info() CASCADE;
+DROP FUNCTION IF EXISTS get_jesgo_document(integer[]) CASCADE;
+DROP FUNCTION IF EXISTS get_jesgo_filtered_root_document(jsonb) CASCADE;
+DROP FUNCTION IF EXISTS search_jesgo_document(integer[], text[], integer[]) CASCADE;
+DROP FUNCTION IF EXISTS search_jesgo_document_multiple(jsonb, integer[]) CASCADE;
 -- DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 
 -- 削除完了のログ（jesgo_system_logテーブルが存在する場合のみ）

@@ -590,7 +590,8 @@ const TabSchema = React.memo((props: Props) => {
     ) {
       dispatch({ type: 'CHANGED_SCHEMA', documentId, schemaInfo });
     }
-  }, [formData, updateChildFormData, schemaInfo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData, updateChildFormData, schemaInfo, customSchema, dispSubSchemaIdsNotDeleted, dispChildSchemaIdsNotDeleted]);
 
   return (
     <>

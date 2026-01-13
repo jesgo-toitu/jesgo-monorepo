@@ -4,7 +4,6 @@ import { ApiReturnObject, RESULT } from '../logic/ApiCommon';
 import { logging, LOGTYPE } from '../logic/Logger';
 import { Const, isAgoYearFromNow, jesgo_tagging } from '../logic/Utility';
 import { getItemsAndNames, JSONSchema7 } from './JsonToDatabase';
-import { error } from 'console';
 import {
   addStatus,
   addStatusAllowDuplicate,
@@ -88,6 +87,7 @@ export interface searchPatientRequest extends ParsedQs {
   pageSize?: string;
   sortColumn?: string;
   sortDirection?: string;
+  presetId?: string;
   // プリセット項目の絞り込み条件（クエリパラメータ用：文字列、POSTリクエストボディ用：配列）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   presetFilters?: any;
@@ -116,6 +116,7 @@ export interface searchPatientRequestBody {
   pageSize?: number;
   sortColumn?: string;
   sortDirection?: string;
+  presetId?: string;
   // プリセット項目の絞り込み条件（リクエストボディから取得）
   presetFilters?: Array<{
     field_id: number;
@@ -684,8 +685,9 @@ export const searchPatients = async (
       if (Array.isArray(errorProperty) && errorProperty.filter(item => item != null).length > 0) {
         if (errorProperty.some(item => (item as string).includes('要確認')))
           userData.registration.push(STATUS_STRINGS.HAS_WARN);
-        if (errorProperty.some(item => (item as string).includes('要修正')))
-          userData.registration.push(STATUS_STRINGS.HAS_ERROR); 
+        if (errorProperty.some(item => (item as string).includes('要修正'))) {
+          userData.registration.push(STATUS_STRINGS.HAS_ERROR);
+        }
       }
     } 
 
@@ -1071,7 +1073,13 @@ export const searchPatients = async (
     `プリセット項目の絞り込み処理チェック: query.presetFilters=${JSON.stringify(query.presetFilters)}, type=${typeof query.presetFilters}, isArray=${Array.isArray(query.presetFilters)}`,
     'SearchPatient-searchPatients'
   );
-  
+
+  const presetId = query.presetId ? parseInt(query.presetId as string) : 0;
+  const filteredDocuments = new Map<string, number[]>();
+  const addFilteredDocument = (field_name: string, document_id: number) => {
+    const documentIds = filteredDocuments.get(field_name) ?? filteredDocuments.set(field_name, []).get(field_name)!;
+    documentIds.push(document_id);
+  }
   if (query.presetFilters) {
     try {
       // presetFiltersが文字列の場合はパース、配列の場合はそのまま使用
@@ -1123,7 +1131,7 @@ export const searchPatients = async (
 
       // 各絞り込み条件を処理
       for (const filter of presetFilters) {
-        const { field_name, field_path, field_type, value } = filter;
+        let { field_name, field_path, field_type, value } = filter;
         
         logging(
           LOGTYPE.DEBUG,
@@ -1141,12 +1149,18 @@ export const searchPatients = async (
             [FIXED_FIELD_NAMES.PATIENT_ID]: USER_DATA_PROPERTIES.PATIENT_ID,
             [FIXED_FIELD_NAMES.PATIENT_NAME]: USER_DATA_PROPERTIES.PATIENT_NAME,
             [FIXED_FIELD_NAMES.AGE]: USER_DATA_PROPERTIES.AGE,
-            [FIXED_FIELD_NAMES.INITIAL_TREATMENT_DATE]: USER_DATA_PROPERTIES.START_DATE,
-            [FIXED_FIELD_NAMES.DIAGNOSIS]: USER_DATA_PROPERTIES.DIAGNOSIS,
-            [FIXED_FIELD_NAMES.ADVANCED_STAGE]: USER_DATA_PROPERTIES.ADVANCED_STAGE,
-            [FIXED_FIELD_NAMES.STATUS]: USER_DATA_PROPERTIES.STATUS,
-            [FIXED_FIELD_NAMES.LAST_UPDATE]: USER_DATA_PROPERTIES.LAST_UPDATE,
+            [FIXED_FIELD_NAMES.LAST_UPDATE]: USER_DATA_PROPERTIES.LAST_UPDATE
           };
+
+          // 標準プリセットのみ固定項目として処理
+          if (presetId == 1) {
+            Object.assign(fixedFieldMapping, {
+              [FIXED_FIELD_NAMES.INITIAL_TREATMENT_DATE]: USER_DATA_PROPERTIES.START_DATE,
+              [FIXED_FIELD_NAMES.DIAGNOSIS]: USER_DATA_PROPERTIES.DIAGNOSIS,
+              [FIXED_FIELD_NAMES.ADVANCED_STAGE]: USER_DATA_PROPERTIES.ADVANCED_STAGE,
+              [FIXED_FIELD_NAMES.STATUS]: USER_DATA_PROPERTIES.STATUS
+            });
+          }
 
           // 固定項目の場合はuserDataから直接取得
           const isFixedField = fixedFieldMapping[field_name] !== undefined;
@@ -1280,24 +1294,45 @@ export const searchPatients = async (
               // カスタム項目の場合はドキュメントから取得
               for (const dbRow of patientDbRows) {
                 if (dbRow.document && typeof dbRow.document === 'object') {
-                  const fieldValue = getFieldValue(dbRow);
-                  if (fieldValue != null) {
-                    const fieldValueStr = String(fieldValue);
-                    
-                    if (regexPattern) {
-                      // 正規表現としてマッチング
-                      if (tryRegexMatch(fieldValueStr, regexPattern.pattern, regexPattern.flags)) {
-                        found = true;
-                        break;
-                      }
-                    } else {
-                      // 通常の部分一致検索
-                      if (fieldValueStr.includes(searchValueStr)) {
-                        found = true;
-                        break;
+                  const checkFieldValue = () => {
+                    const fieldValue = getFieldValue(dbRow);
+                    console.log(`${dbRow.schemaidstring} ${fieldValue}`);
+                    if (fieldValue != null) {
+                      const fieldValueStr = String(fieldValue);
+                      if (regexPattern) {
+                        // 正規表現としてマッチング
+                        if (tryRegexMatch(fieldValueStr, regexPattern.pattern, regexPattern.flags)) {
+                          found = true;
+                          addFilteredDocument(filter.field_name, dbRow.document_id);
+                        }
+                      } else {
+                        // 通常の部分一致検索
+                        if (fieldValueStr.includes(searchValueStr)) {
+                          found = true;
+                          addFilteredDocument(filter.field_name, dbRow.document_id);
+                        }
                       }
                     }
                   }
+                  switch (field_name) {
+                    case FIXED_FIELD_NAMES.DIAGNOSIS: {
+                      field_name = Const.JESGO_TAG.CANCER_MAJOR;
+                      checkFieldValue();
+                      field_name = Const.JESGO_TAG.CANCER_MINOR;
+                      checkFieldValue();
+                      field_name = FIXED_FIELD_NAMES.DIAGNOSIS;
+                      break;
+                    }
+                    case FIXED_FIELD_NAMES.ADVANCED_STAGE: {
+                      field_name = Const.JESGO_TAG.FIGO;
+                      checkFieldValue();
+                      break;
+                    }
+                    default: {
+                      checkFieldValue();
+                      break;
+                    }
+                  };
                 }
               }
             }
@@ -1412,7 +1447,7 @@ export const searchPatients = async (
                       // 正規表現としてマッチング
                       if (tryRegexMatch(fieldValueStr, regexPattern.pattern, regexPattern.flags)) {
                         found = true;
-                        break;
+                        addFilteredDocument(filter.field_name, dbRow.document_id);
                       }
                     } else {
                       // 通常の数値比較または文字列比較
@@ -1423,13 +1458,13 @@ export const searchPatients = async (
                         // 両方とも数値として解釈できる場合は数値比較
                         if (fieldValueNum === searchValueNum) {
                           found = true;
-                          break;
+                          addFilteredDocument(filter.field_name, dbRow.document_id);
                         }
                       } else {
                         // 数値として解釈できない場合は文字列比較
                         if (fieldValueStr.includes(searchValueStr)) {
                           found = true;
-                          break;
+                          addFilteredDocument(filter.field_name, dbRow.document_id);
                         }
                       }
                     }
@@ -1466,6 +1501,12 @@ export const searchPatients = async (
               // カスタム項目の場合はドキュメントから取得
               for (const dbRow of patientDbRows) {
                 if (dbRow.document && typeof dbRow.document === 'object') {
+                  switch (field_name) {
+                    case FIXED_FIELD_NAMES.INITIAL_TREATMENT_DATE: {
+                      field_name = Const.JESGO_TAG.INITIAL_TREATMENT_DATE;
+                      break;
+                    }
+                  };
                   const fieldValue = getFieldValue(dbRow);
                   if (fieldValue) {
                     const fieldDate = new Date(fieldValue as string);
@@ -1473,12 +1514,12 @@ export const searchPatients = async (
                       if (fromDate && toDate) {
                         if (fieldDate >= fromDate && fieldDate <= toDate) {
                           found = true;
-                          break;
+                          addFilteredDocument(filter.field_name, dbRow.document_id);
                         }
                       } else if (fromDate) {
                         if (fieldDate >= fromDate) {
                           found = true;
-                          break;
+                          addFilteredDocument(filter.field_name, dbRow.document_id);
                         }
                       }
                     }
@@ -1490,62 +1531,106 @@ export const searchPatients = async (
               shouldRemove = true;
             }
           } else if (field_type === 'status') {
-            // 未入力項目で絞り込み：未入力項目で絞り込みと同じロジック
-            // valueはJSON文字列として送信される（各項目のチェック状態を含むオブジェクト）
-            let statusFilter: {
-              advancedStage?: boolean;
-              pathlogicalDiagnosis?: boolean;
-              initialTreatment?: boolean;
-              complications?: boolean;
-              threeYearPrognosis?: boolean;
-              fiveYearPrognosis?: boolean;
-            } | null = null;
+            // ステータスアイコンの配列でフィルタリング
+            // valueはJSON文字列として送信される（選択されたステータスアイコンの配列）
+            let selectedStatusIcons: string[] = [];
             
             try {
-              statusFilter = JSON.parse(value as string);
-            } catch (e) {
-              // JSONパースに失敗した場合は、従来の'true'形式として扱う
-              if (value === 'true') {
-                statusFilter = { advancedStage: true };
+              const parsedValue = JSON.parse(value as string);
+              // 配列の場合はそのまま使用、オブジェクトの場合は空配列（後方互換性のため）
+              if (Array.isArray(parsedValue)) {
+                selectedStatusIcons = parsedValue;
+              } else if (typeof parsedValue === 'object' && parsedValue !== null) {
+                // オブジェクト形式（従来の形式）の場合は空配列として扱う（後方互換性のため）
+                selectedStatusIcons = [];
               }
+            } catch (e) {
+              // JSONパースに失敗した場合は空配列
+              selectedStatusIcons = [];
             }
             
-            if (statusFilter) {
-              // 少なくとも1つの項目がチェックされている場合のみ処理
-              const hasAnyCheck = statusFilter.advancedStage || statusFilter.pathlogicalDiagnosis || 
-                                  statusFilter.initialTreatment || statusFilter.complications || 
-                                  statusFilter.threeYearPrognosis || statusFilter.fiveYearPrognosis;
-              
-              if (hasAnyCheck) {
-                // チェックされた項目のうち、1つでも未入力でない場合は削除
-                // 進行期のチェック
-                if (statusFilter.advancedStage && userData.advancedStage.indexOf(DISPLAY_STRINGS.NOT_ENTERED) == -1) {
-                  shouldRemove = true;
+            if (selectedStatusIcons.length > 0) {
+              if (isFixedField) {
+                // 固定項目の場合はuserDataから直接取得した値を使用
+                if (fixedFieldValue) {
+                  // 選択されたステータスアイコンのうち、1つでもuserData.statusに含まれていない場合は削除
+                  // 少なくとも1つのステータスアイコンが一致する必要がある
+                  const hasMatchingStatus = selectedStatusIcons.some((icon: string) => 
+                    userData.status.includes(icon)
+                  );
+                  
+                  if (!hasMatchingStatus) {
+                    shouldRemove = true;
+                  }
                 }
-                
-                // 診断のチェック
-                if (statusFilter.pathlogicalDiagnosis && userData.diagnosis.indexOf(DISPLAY_STRINGS.NOT_ENTERED) == -1) {
-                  shouldRemove = true;
+              } else {
+                // カスタム項目の場合はドキュメントから取得
+                const matchingStatusMap = new Map<string, number[]>();
+                const addMatchingStatusDocument = (status: string, document_id: number) => {
+                  const documentIds = matchingStatusMap.get(status) ?? matchingStatusMap.set(status, []).get(status)!;
+                  documentIds.push(document_id);
                 }
-                
-                // 初回治療のチェック
-                if (statusFilter.initialTreatment && userData.initialTreatment.length > 0) {
-                  shouldRemove = true;
+                for (const dbRow of patientDbRows) {
+                  if (dbRow.document && typeof dbRow.document === 'object') {
+                    for (const selectedStatusIcon of selectedStatusIcons) {
+                      let hasMatchingStatus = false;
+                      switch (selectedStatusIcon) {
+                        case STATUS_STRINGS.DEATH: {
+                          hasMatchingStatus = dbRow.date_of_death !== null;
+                          break;
+                        }
+                        default: {
+                          const docSchema = JSON.stringify(dbRow.document_schema);
+                          switch (selectedStatusIcon) {
+                            case STATUS_STRINGS.RECURRENCE: {
+                              hasMatchingStatus = docSchema.includes(jesgo_tagging(Const.JESGO_TAG.RECURRENCE));
+                              break;
+                            }
+                            case STATUS_STRINGS.SURGERY: {
+                              hasMatchingStatus =
+                                docSchema.includes(jesgo_tagging(Const.JESGO_TAG.TREATMENT_SURGERY)) &&
+                                (getPropertyNameFromTag(Const.JESGO_TAG.TREATMENT_SURGERY, dbRow.document, dbRow.document_schema) ?? '') !== '';
+                              break;
+                            }
+                            case STATUS_STRINGS.COMPLICATIONS: {
+                              hasMatchingStatus =
+                                docSchema.includes(jesgo_tagging(Const.JESGO_TAG.TREATMENT_SURGERY)) &&
+                                docSchema.includes(jesgo_tagging(Const.JESGO_TAG.SURGIGAL_COMPLICATIONS)) &&
+                                (getPropertyNameFromTag(Const.JESGO_TAG.TREATMENT_SURGERY, dbRow.document, dbRow.document_schema) ?? '') !== '' &&
+                                (getPropertyNameFromTag(Const.JESGO_TAG.SURGIGAL_COMPLICATIONS, dbRow.document, dbRow.document_schema) ?? '') === 'あり';
+                              break;
+                            }
+                            case STATUS_STRINGS.CHEMO: {
+                              hasMatchingStatus =
+                                docSchema.includes(jesgo_tagging(Const.JESGO_TAG.TREATMENT_CHEMO)) &&
+                                (getPropertyNameFromTag(Const.JESGO_TAG.TREATMENT_CHEMO, dbRow.document, dbRow.document_schema) ?? '') !== '';
+                              break;
+                            }
+                            case STATUS_STRINGS.RADIO: {
+                              hasMatchingStatus =
+                                docSchema.includes(jesgo_tagging(Const.JESGO_TAG.TREATMENT_RADIO)) &&
+                                (getPropertyNameFromTag(Const.JESGO_TAG.TREATMENT_RADIO, dbRow.document, dbRow.document_schema) ?? '') !== '';
+                              break;
+                            }
+                            case STATUS_STRINGS.SUPPORTIVECARE: {
+                              hasMatchingStatus =
+                                docSchema.includes(jesgo_tagging(Const.JESGO_TAG.TREATMENT_SUPPORTIVECARE)) &&
+                                (getPropertyNameFromTag(Const.JESGO_TAG.TREATMENT_SUPPORTIVECARE, dbRow.document, dbRow.document_schema) ?? '') !== '';
+                              break;
+                            }
+                          }
+                        }
+                      }
+                      if (hasMatchingStatus) { addMatchingStatusDocument(selectedStatusIcon, dbRow.document_id); }
+                    }
+                  }
                 }
-                
-                // 合併症のチェック
-                if (statusFilter.complications && !userData.complications.includes(STATUS_STRINGS.NO_INPUT)) {
-                  shouldRemove = true;
-                }
-                
-                // 3年予後のチェック
-                if (statusFilter.threeYearPrognosis && !userData.threeYearPrognosis.includes(STATUS_STRINGS.NOT_COMPLETED)) {
-                  shouldRemove = true;
-                }
-                
-                // 5年予後のチェック
-                if (statusFilter.fiveYearPrognosis && !userData.fiveYearPrognosis.includes(STATUS_STRINGS.NOT_COMPLETED)) {
-                  shouldRemove = true;
+                if (selectedStatusIcons.some((icon) => (matchingStatusMap.get(icon) ?? []).length == 0)) { shouldRemove = true; }
+                else {
+                  for (const [key, values] of matchingStatusMap) {
+                    const documentIds = filteredDocuments.get(key) ?? filteredDocuments.set(key, []).get(key)!;
+                    for (const value of values) { documentIds.push(value); }
+                  }
                 }
               }
             }
@@ -1596,7 +1681,7 @@ export const searchPatients = async (
                   const convertedValue = convertToBoolean(fieldValue);
                   if (convertedValue !== null && convertedValue === boolValue) {
                     found = true;
-                    break;
+                    addFilteredDocument(filter.field_name, dbRow.document_id);
                   }
                 }
               }
@@ -1707,8 +1792,9 @@ export const searchPatients = async (
 
   // ページング処理
   // デフォルト値: page=1, pageSize=50
-  const page = query.page ? parseInt(query.page as string, 10) : 1;
-  const pageSize = query.pageSize ? parseInt(query.pageSize as string, 10) : 50;
+  // カスタムプリセットの場合、ページングはフロント側で対応
+  const page = 1 < presetId ? 0 : query.page ? parseInt(query.page as string, 10) : 1;
+  const pageSize = 1 < presetId ? 0 : query.pageSize ? parseInt(query.pageSize as string, 10) : 50;
   
   let paginatedData = userDataList;
   if (!isNaN(page) && !isNaN(pageSize) && page > 0 && pageSize > 0) {
@@ -1721,7 +1807,8 @@ export const searchPatients = async (
     statusNum: RESULT.NORMAL_TERMINATION, 
     body: { 
       data: paginatedData,
-      totalCount: totalCount
+      totalCount: totalCount,
+      filteredDocuments: Array.from(filteredDocuments.values())
     } 
   };
 };

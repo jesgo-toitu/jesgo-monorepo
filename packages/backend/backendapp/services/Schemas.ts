@@ -3,6 +3,7 @@ import { logging, LOGTYPE } from '../logic/Logger';
 import { ApiReturnObject, RESULT } from '../logic/ApiCommon';
 import { DbAccess } from '../logic/DbAccess';
 import { formatDateStr, JSONSchema7, JSONSchema7TypeName } from './JsonToDatabase';
+import { PresetFieldData } from './Presets';
 
 export interface getJsonSchemaBody {
   ids: number[] | undefined;
@@ -135,63 +136,113 @@ export const getRootSchemaIds = async (): Promise<ApiReturnObject> => {
   }
 };
 
+export const isInCommonSchema = (treeList: treeSchema[], schemaId: number): boolean => {
+  for (const tree of treeList) {
+    if (tree.schema_id === schemaId) return true;
+    if (isInCommonSchema(tree.subschema, schemaId)) return true;
+    if (isInCommonSchema(tree.childschema, schemaId)) return true;
+    if (isInCommonSchema(tree.inheritschema, schemaId)) return true;
+  }
+  return false;
+};
+
+export const isCommonSchema = (schemaId: number, schemas: schemaRecord[], refMap: Map<number, number>, parentMap: Map<number, Set<number>>): boolean => {
+  if ((refMap.get(schemaId) ?? 0) < 2) return false;
+  const schema = schemas.find(schema => schema.schema_id === schemaId);
+  if (!schema) return false;
+
+  const childIds = [
+    ...schema.subschema,
+    ...schema.child_schema,
+    ...schema.inherit_schema
+  ];
+
+  for (const childId of childIds) {
+    const parents = parentMap.get(childId);
+    if (!parents || parents.size > 1 || !parents.has(schemaId)) return false;
+  }
+
+  return true;
+}
+
 export const analyseSchemaTree = async (): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, `呼び出し`, 'Schemas', 'analyseSchemaTree');
   try {
-    // 最初にすべてのスキーマの最新を取得(バージョンは必要ない)
-    const allSchemaObject = await getJsonSchema(true);
-    const allSchemas = allSchemaObject.body as schemaRecord[] || [];
+    const latestSchemas = (await getJsonSchema(true)).body as schemaRecord[] || [];
+    const rootIds = (await getRootSchemaIds()).body as number[] || [];
 
-    // 続いてにルートスキーマのIDを取得
-    const rootIdObject = await getRootSchemaIds();
-    const rootIds = rootIdObject.body as number[] || [];
+    const refCountMap = new Map<number, number>();
+    const parentCountMap = new Map<number, Set<number>>();
 
-    // 保存用オブジェクト
+    // 共通スキーマの抽出
+    for (const schema of latestSchemas) {
+      const childIds = [
+        ...schema.subschema,
+        ...schema.child_schema,
+        ...schema.inherit_schema
+      ];
+      for (const childId of childIds) {
+        refCountMap.set(childId, (refCountMap.get(childId) ?? 0) + 1);
+        if (!parentCountMap.has(childId)) parentCountMap.set(childId, new Set());
+        parentCountMap.get(childId)!.add(schema.schema_id);
+      }
+    }
+
+    // ルートスキーマ
     const schemaTrees: treeSchema[] = [];
-
-    // 無限ループ防止用ブラックリスト
     const blackList: number[] = [];
+    for (const rootId of rootIds) {
+      const schema = latestSchemas.find(schema => schema.schema_id === rootId);
+      if (!schema) continue;
+      const tree = schemaRecord2SchemaTree(schema, latestSchemas, [0], blackList);
+      if (tree) schemaTrees.push(tree);
+    }
 
-    // ルートスキーマを順番にツリー用に処理する
-    for (let index = 0; index < rootIds.length; index++) {
-      const rootId = rootIds[index];
-      if (!blackList.includes(rootId)) {
-        // 対象のルートスキーマIDに一致するスキーマレコードを取得
-        const rootSchema = allSchemas.find(
-          (schema) => schema.schema_id === rootId
-        );
-
-        if (rootSchema) {
-          // スキーマレコードが取得できた場合、ツリー用に処理する
-          const rootSchemaForTree = schemaRecord2SchemaTree(
-            rootSchema,
-            allSchemas,
-            [0],
-            blackList
-          );
-          if (rootSchemaForTree) {
-            schemaTrees.push(rootSchemaForTree);
-          }
+    // 共通スキーマ
+    const commonSchemaTrees: treeSchema[] = [];
+    const commonSchemaIdStrings = [
+      '/schema/treatment/operation',
+      '/schema/treatment/operation/detailed',
+      '/schema/treatment/operation_main_selector',
+      '/schema/treatment/operation_main_selector/detailed_main_selector'
+    ];
+    for (const commonSchemaIdString of commonSchemaIdStrings) {
+      const schema = latestSchemas.find((schema) => schema.schema_id_string === commonSchemaIdString);
+      if (schema) {
+        const tree = schemaRecord2SchemaTree(schema, latestSchemas, [0], []);
+        if (tree) {
+          if (schema.schema_id_string.includes('_selector')) tree.schema_title += ' (希少がん)'
+          commonSchemaTrees.push(tree);
         }
       }
     }
-    const errorMessages = [];
-    for (let i = 0; i < blackList.length; i++) {
-      const blackListedSchema = allSchemas.find(
-        (schema) => schema.schema_id === blackList[i]
-      );
-      if (blackListedSchema) {
-        const schemaName = blackListedSchema.subtitle
-          ? `${blackListedSchema.title} ${blackListedSchema.subtitle}`
-          : blackListedSchema.title;
-        const msg = `${schemaName}($id=${blackListedSchema.schema_id_string})について呼び出しがループしています。上位スキーマ、下位スキーマを見直してください。`;
-        errorMessages.push(msg);
-      }
+
+    for (const schema of latestSchemas) {
+      const schemaId = schema.schema_id;
+      if (schemaId === 0 || rootIds.includes(schemaId)) continue;
+      if (!isCommonSchema(schemaId, latestSchemas, refCountMap, parentCountMap)) continue;
+      if (isInCommonSchema(commonSchemaTrees, schemaId)) continue;
+      const tree = schemaRecord2SchemaTree(schema, latestSchemas, [0], []);
+      if (tree) commonSchemaTrees.push(tree);
     }
+
+    // エラー確認
+    const errorMessages: string[] = [];
+    for (const blackId of blackList) {
+      const schema = latestSchemas.find(schema => schema.schema_id === blackId);
+      if (!schema) continue;
+      let schemaName = schema.title;
+      if (schema.subtitle) schemaName += ` ${schema.subtitle}`;
+      errorMessages.push(`${schemaName}($id=${schema.schema_id_string})について呼び出しがループしています。上位スキーマ、下位スキーマを見直してください。`);
+    }
+
+    console.log(`共通スキーマ数: ${commonSchemaTrees.length}`);
+
     return {
       statusNum: RESULT.NORMAL_TERMINATION,
       body: {
         treeSchema: schemaTrees,
+        commonTreeSchema: commonSchemaTrees.sort((a, b) => a.schema_id - b.schema_id),
         errorMessages: errorMessages,
         blackList,
       },
@@ -207,8 +258,9 @@ export const analyseSchemaTree = async (): Promise<ApiReturnObject> => {
       statusNum: RESULT.ABNORMAL_TERMINATION,
       body: {
         treeSchema: [],
+        commonTreeSchema: [],
         errorMessages: ['スキーマツリーの取得に失敗しました。'],
-        blackList: [],
+        blackList: []
       },
     };
   }
@@ -245,12 +297,14 @@ export const getSchemaTree = async (): Promise<ApiReturnObject> => {
   const returned: ApiReturnObject = await analyseSchemaTree();
   const apiBody = returned.body as {
     treeSchema: treeSchema[];
+    commonTreeSchema: treeSchema[];
     errorMessages: string[];
   };
   return {
     statusNum: returned.statusNum,
     body: {
       treeSchema: apiBody.treeSchema,
+      commonTreeSchema: apiBody.commonTreeSchema,
       errorMessages: apiBody.errorMessages,
     },
   };
@@ -486,6 +540,10 @@ type jesgoDocumentFromDb = {
   root_order: number;
 };
 
+type jesgoDocumentWithRootFromDb = jesgoDocumentFromDb & {
+  root_document_id: number;
+};
+
 // 症例情報の定義
 export type jesgoCaseDefine = {
   case_id: string;
@@ -528,10 +586,19 @@ export type jesgoDocumentObjDefine = {
   delete_document_keys: string[];
 };
 
+export type jesgoDocumentObjDefineWithRoot = jesgoDocumentObjDefine & {
+  root_key: string;
+}
+
 // 保存用のオブジェクト この内容をJSON化して送信
 export interface SaveDataObjDefine {
   jesgo_case: jesgoCaseDefine;
   jesgo_document: jesgoDocumentObjDefine[];
+}
+
+export interface SaveDataObjDefineWithRoot {
+  jesgo_case: jesgoCaseDefine;
+  jesgo_document: jesgoDocumentObjDefineWithRoot[];
 }
 
 /**
@@ -885,7 +952,10 @@ export const getCaseAndDocument = async (
  * @returns 各患者の症例データとドキュメントデータ
  */
 export const getCasesAndDocuments = async (
-  caseIds: number[]
+  caseIds: number[],
+  selectedPresetId: number | null,
+  filteredDocuments: number[][],
+  isCsvExport: boolean
 ): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, `呼び出し`, 'Schemas', 'getCasesAndDocuments');
   try {
@@ -897,10 +967,76 @@ export const getCasesAndDocuments = async (
     await dbAccess.connectWithConf();
 
     // 複数の症例データを一括取得
-    const retCases = (await dbAccess.query(
+    let retCases = (await dbAccess.query(
       'SELECT * FROM jesgo_case WHERE case_id = any($1) AND deleted = false',
       [caseIds]
     )) as jesgoCaseDefine[];
+
+    let retDocs: jesgoDocumentWithRootFromDb[] = [];
+    const getDocuments = async() => {
+      // 複数の患者のドキュメントを一括取得
+      retDocs = (await dbAccess.query(
+        'SELECT *, 0 as root_document_id FROM jesgo_document WHERE case_id = any($1) AND deleted = false ORDER BY case_id, document_id',
+        [caseIds]
+      )) as jesgoDocumentWithRootFromDb[];
+    }
+    let presetFields: PresetFieldData[] = [];
+    if (selectedPresetId && 1 < selectedPresetId) {
+      const fieldsQuery = `
+SELECT 
+  pf.field_id,
+  pf.preset_id,
+  pf.schema_primary_id,
+  pf.schema_id,
+  pf.schema_id_string,
+  pf.field_name,
+  pf.display_name,
+  pf.field_path,
+  pf.field_type,
+  pf.schema_path,
+  pf.property_path,
+  pf.is_visible,
+  pf.is_csv_export,
+  pf.is_csv_header_display_name,
+  pf.is_fixed,
+  pf.display_order,
+  pf.schema_title,
+  pf.schema_version,
+  pf.created_at,
+  pf.updated_at
+FROM jesgo_preset_field pf
+WHERE pf.preset_id = $1 AND NOT pf.is_fixed AND (($2 AND is_csv_export) OR (NOT $2 AND is_visible))
+ORDER BY pf.display_order
+`;
+      presetFields = await dbAccess.query(fieldsQuery, [selectedPresetId, isCsvExport]) as PresetFieldData[];
+      if (0 < presetFields?.length) {
+        const searchJsons = presetFields.map(presetField => ({
+          schema_path: presetField.schema_path,
+          document_key_path: presetField.property_path
+        }));
+        const rootDocumentDatas = await dbAccess.query(
+          `SELECT * FROM search_jesgo_document_multiple($1::jsonb, $2::integer[]);`,
+          [JSON.stringify(searchJsons), retCases.map((caseDefine) => caseDefine.case_id)]
+        ) as { document_id: number, case_id: number }[];
+        let filteredDocumentIds = rootDocumentDatas.map((data) => data.document_id);
+        if (0 < filteredDocuments.length) {
+          const filteredRootDocumentDatas = await dbAccess.query(
+            `SELECT root_document_id FROM get_jesgo_filtered_root_document($1::jsonb);`,
+            [JSON.stringify(filteredDocuments)]
+          ) as {root_document_id: number }[];
+          if (0 < filteredRootDocumentDatas?.length) {
+            const filteredRootDocumentIds = filteredRootDocumentDatas.map((data) => data.root_document_id);
+            filteredDocumentIds = filteredDocumentIds.filter((documentId) => filteredRootDocumentIds.includes(documentId));
+          } else filteredDocumentIds = [];
+        }
+        retDocs = await dbAccess.query(
+          `SELECT * FROM get_jesgo_document($1::integer[]);`,
+          [filteredDocumentIds]
+        ) as jesgoDocumentWithRootFromDb[];
+        const filteredCaseIds = Array.from(new Set(retDocs.map(doc => doc.case_id)));
+        retCases = retCases.filter((caseDefine) => filteredCaseIds.includes(Number(caseDefine.case_id)));
+      } else await getDocuments();
+    } else await getDocuments();
 
     // 症例IDのマップを作成（存在する症例のみ）
     const caseMap = new Map<number, jesgoCaseDefine>();
@@ -908,19 +1044,13 @@ export const getCasesAndDocuments = async (
       caseMap.set(Number(caseData.case_id), caseData);
     }
 
-    // 複数の患者のドキュメントを一括取得
-    const retDocs = (await dbAccess.query(
-      'SELECT * FROM jesgo_document WHERE case_id = any($1) AND deleted = false ORDER BY case_id, document_id',
-      [caseIds]
-    )) as jesgoDocumentFromDb[];
-
     // 症例IDごとにドキュメントをグループ化
-    const documentsByCase = new Map<number, jesgoDocumentObjDefine[]>();
+    const documentsByCase = new Map<number, jesgoDocumentObjDefineWithRoot[]>();
     for (const doc of retDocs) {
       if (!documentsByCase.has(doc.case_id)) {
         documentsByCase.set(doc.case_id, []);
       }
-      const newDoc: jesgoDocumentObjDefine = {
+      const newDoc: jesgoDocumentObjDefineWithRoot = {
         key: doc.document_id.toString(),
         value: {
           case_id: doc.case_id.toString(),
@@ -942,16 +1072,17 @@ export const getCasesAndDocuments = async (
         event_date_prop_name: '19700101',
         death_data_prop_name: '19700101',
         delete_document_keys: [],
+        root_key: doc.root_document_id.toString()
       };
       documentsByCase.get(doc.case_id)?.push(newDoc);
     }
 
     // リクエストされた順序で結果を構築
-    const result: SaveDataObjDefine[] = [];
+    const result: SaveDataObjDefineWithRoot[] = [];
     for (const caseId of caseIds) {
       const caseData = caseMap.get(caseId);
       if (caseData) {
-        const returnObj: SaveDataObjDefine = {
+        const returnObj: SaveDataObjDefineWithRoot = {
           jesgo_case: caseData,
           jesgo_document: documentsByCase.get(caseId) || [],
         };

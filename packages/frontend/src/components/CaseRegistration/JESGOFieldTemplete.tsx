@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 // eslint-disable-next-line import/no-unresolved
 import { JSONSchema7, JSONSchema7Type } from 'json-schema';
 import {
@@ -150,38 +150,40 @@ export namespace JESGOFiledTemplete {
     }
 
     // jesgo:ui:visibleWhen
-    const visibleWhenCondition: VisibleWhenItem[] = [];
-    const propertiesItem = getPropItemsAndNames(items);
-    propertiesItem.pNames.forEach((name: string) => {
-      const item = propertiesItem.pItems[name] as JSONSchema7;
-      const visiblewhenItem = item[
-        Const.EX_VOCABULARY.UI_VISIBLE_WHEN
-      ] as JSONSchema7;
-      if (visiblewhenItem) {
-        const vPropItem = getPropItemsAndNames(visiblewhenItem);
-        vPropItem.pNames.forEach((vName: string) => {
-          const vItem = vPropItem.pItems[vName] as JSONSchema7;
-          let values;
-          let pattern;
-          if (vItem.const) {
-            values = [vItem.const];
-          } else if (vItem.enum) {
-            values = [...vItem.enum];
-          } else if (vItem.pattern) {
-            pattern = new RegExp(vItem.pattern);
-          }
-          visibleWhenCondition.push({
-            parentItemName: name,
-            name: vName,
-            values,
-            pattern,
+    const visibleWhenCondition: VisibleWhenItem[] = useMemo(() => {
+      const conditions: VisibleWhenItem[] = [];
+      const propertiesItem = getPropItemsAndNames(items);
+      propertiesItem.pNames.forEach((name: string) => {
+        const item = propertiesItem.pItems[name] as JSONSchema7;
+        const visiblewhenItem = item[
+          Const.EX_VOCABULARY.UI_VISIBLE_WHEN
+        ] as JSONSchema7;
+        if (visiblewhenItem) {
+          const vPropItem = getPropItemsAndNames(visiblewhenItem);
+          vPropItem.pNames.forEach((vName: string) => {
+            const vItem = vPropItem.pItems[vName] as JSONSchema7;
+            let values;
+            let pattern;
+            if (vItem.const) {
+              values = [vItem.const];
+            } else if (vItem.enum) {
+              values = [...vItem.enum];
+            } else if (vItem.pattern) {
+              pattern = new RegExp(vItem.pattern);
+            }
+            conditions.push({
+              parentItemName: name,
+              name: vName,
+              values,
+              pattern,
+            });
           });
-        });
-      }
-    });
+        }
+      });
+      return conditions;
+    }, [items]);
 
     useEffect(() => {
-
       // jesgo:ui:visibleWhenによる項目表示/非表示制御
       // eslint-disable-next-line react/destructuring-assignment
       if (props.items) {
@@ -192,13 +194,13 @@ export namespace JESGOFiledTemplete {
           // visiblewhen
           visibleWhenCondition.forEach((condition: VisibleWhenItem) => {
             // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            const inputData = formData[index][condition.name] as JSONSchema7Type;
+            const inputData = formData?.[index]?.[condition.name] as JSONSchema7Type;
 
             // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             const itemId = editItem.children.props.idSchema[
               condition.parentItemName
-            ].$id as string;
-            const element = document.getElementById(itemId);
+            ]?.$id as string;
+            const element = itemId ? document.getElementById(itemId) : null;
             if (element) {
               let parentElement = element.parentElement
               // 単位付きフィールドではもう一つ上の階層がdiv.visiblewhenとなる
@@ -235,7 +237,7 @@ export namespace JESGOFiledTemplete {
           });
         });
       }
-    });
+    }, [formData, props.items, visibleWhenCondition]);
    
     return (
       <div>
