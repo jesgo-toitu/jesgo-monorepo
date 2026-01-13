@@ -8,7 +8,7 @@ import {
   JSONSchema7Array,
 } from 'json-schema'; // eslint-disable-line import/no-unresolved
 import JSONPointer from 'jsonpointer';
-import lodash, { cond } from 'lodash';
+import lodash from 'lodash';
 import { Dispatch } from 'redux';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
 import { isNotEmptyObject } from '../../common/CaseRegistrationUtility';
@@ -16,7 +16,6 @@ import { formatDate, isDate } from '../../common/CommonUtility';
 import { Const } from '../../common/Const';
 import store from '../../store';
 import { JesgoDocumentSchema } from '../../store/schemaDataReducer';
-import { BreakfastDiningOutlined } from '@mui/icons-material';
 
 /** Schema加工用Utility */
 type schemaItem = {
