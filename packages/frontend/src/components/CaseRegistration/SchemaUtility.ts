@@ -436,10 +436,9 @@ const customSchemaIfThenElse = (
       if (condition.properties !== undefined) {
         if (typeof formData === 'object' && !Array.isArray(formData)) {
           const childItems = getPropItemsAndNames(condition);
-          const childFormData = getPropItemsAndNames(formData);
           for (let pName of childItems.pNames) {
-            if (childFormData.pNames.includes(pName)) {
-              if (checkCondition(childItems.pItems[pName] as JSONSchema7, childFormData.pItems[pName], depth - 1)) {
+            if (formData[pName] !== undefined) {
+              if (checkCondition(childItems.pItems[pName] as JSONSchema7, formData[pName], depth - 1)) {
                 return true;
               }
             }
