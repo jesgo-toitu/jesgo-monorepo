@@ -411,67 +411,90 @@ const customSchemaIfThenElse = (
   schema: JSONSchema7,
   formData: any
 ) => {
-  const result = lodash.cloneDeep(schema);
-  if (allOfItem.if && allOfItem.then) {
-    const rootSchemaItem = getPropItemsAndNames(result);
+  // プロパティ探索のリミット
+  const DEPTH_LIMIT = 10;
 
-    // ifの確認
-    const ifItem = getPropItemsAndNames(allOfItem.if as JSONSchema7);
-    // 切り替え条件のプロパティ
-    const matchFlgs: boolean[] = [];
-    ifItem.pNames.forEach((pName: string) => {
-      let matchFlg = false;
-      if (rootSchemaItem.pNames.includes(pName)) {
-        // ifの条件のプロパティが親のプロパティにある
-        const condValueMaps = ifItem.pItems[pName] as JSONSchema7;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const selectValue:
-          | string
-          | number
-          | boolean
-          | JSONSchema7Object
-          | JSONSchema7Array
-          | null = formData[pName]; // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-        const conditionValues = [];
-        let conditionPattern: RegExp | undefined;
-        if (condValueMaps.const) {
-          conditionValues.push(condValueMaps.const);
-        } else if (condValueMaps.enum) {
-          conditionValues.push(...condValueMaps.enum);
-        } else if (condValueMaps.pattern) {
-          conditionPattern = new RegExp(condValueMaps.pattern);
-        }
-        if (conditionPattern) {
-          // patternの場合
-          const value = (selectValue as string) ?? '';
-          if (value.match(conditionPattern)) {
-            matchFlg = true;
+  const result = lodash.cloneDeep(schema);
+
+  // if thenだけではなくif elseだけというパターンも想定しておく("$not"は未対応のため)
+  if (!allOfItem.if || !(allOfItem.then || allOfItem.else)) {
+    return result;
+  }
+
+  const rootSchemaItem = getPropItemsAndNames(result);
+  const ifItem = getPropItemsAndNames(allOfItem.if as JSONSchema7);
+
+  // 必要に応じて再帰的にcontainsの条件をチェック
+  const checkRecursiveCondition = (contains: JSONSchema7, values: any[], depth: number): boolean => {
+    if (contains.properties !== undefined) {
+      // "item": { "type": "object", "properties": { ... } } の場合
+      const containsItems = getPropItemsAndNames(contains);
+      for (const pName of containsItems.pNames) {
+        for (const item of values) {
+          if (Object.prototype.toString.call(item) === '[object Object]') {
+            if (item[pName] !== undefined) {
+              return checkConditions(containsItems.pItems[pName] as JSONSchema7, item[pName], depth - 1)
+            }
           }
-        } else if (conditionValues.includes(selectValue)) {
-          // const,enumの場合
-          matchFlg = true;
         }
       }
-      matchFlgs.push(matchFlg);
-    });
-
-    if (!matchFlgs.includes(false)) {
-      // ifの条件に全て該当すればthenを適用
-      mergeSchemaItem({
-        targetSchema: result,
-        setSchema: allOfItem.then as JSONSchema7,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        formData,
-      });
-    } else if (allOfItem.else) {
-      // それ以外はelseの適用（あれば）
-      mergeSchemaItem({
-        targetSchema: result,
-        setSchema: allOfItem.else as JSONSchema7,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        formData,
-      });
+      return false;
+    } else {
+      // "item": { "type": "string" } などの場合
+      return checkConditions(contains, values, depth - 1);
     }
+  };
+
+  // サポートしている条件
+  // const, enum, pattern, minimum, maximum, exclusiveMinimum, exclusiveMaximum: 値
+  // contains, minItems, maxItems: アレイ
+  const checkConditions = (conditonMaps: JSONSchema7, value: any, depth: number = DEPTH_LIMIT): boolean {
+    if (depth < 0) {
+      return false;
+    }
+
+    if (conditonMaps.contains !== undefined) {
+      return Array.isArray(value) &&
+        checkRecursiveCondition(conditonMaps.contains as JSONSchema7, value, depth - 1);
+    } else if (conditonMaps.const !== undefined) {
+      // 厳密な型判断は行わない(例：10.0 = 10、"1" = 1 は許容)
+      return conditonMaps.const == value;
+    } else if (conditonMaps.enum !== undefined) {
+      return Array.isArray(conditonMaps.enum) && conditonMaps.enum.includes(value);
+    } else if (conditonMaps.pattern !== undefined) {
+      // パターンの正規表現にエラーがある場合はアンマッチ
+      try {
+        const pattern = new RegExp(conditonMaps.pattern);
+        return (value ?? '').toString().match(pattern) !== null;
+      } catch {
+        return false;
+      }
+    } else if ( conditonMaps.minimum ?? conditonMaps.maximum ?? conditonMaps.exclusiveMinimum ?? conditonMaps.exclusiveMaximum ) {
+      const numValue = Number(value);
+      return !isNaN(numValue) &&
+        (conditonMaps.minimum !== undefined ? numValue >= conditonMaps.minimum : true) &&
+        (conditonMaps.maximum !== undefined ? numValue <= conditonMaps.maximum : true) &&
+        (conditonMaps.exclusiveMinimum !== undefined ? numValue > conditonMaps.exclusiveMinimum : true) &&
+        (conditonMaps.exclusiveMaximum !== undefined ? numValue < conditonMaps.exclusiveMaximum : true);
+    } else if ( conditonMaps.minItems ?? conditonMaps.maxItems ) {
+      return Array.isArray(value) &&
+        (conditonMaps.minItems !== undefined ? value.length >= conditonMaps.minItems : true) &&
+        (conditonMaps.maxItems !== undefined ? value.length <= conditonMaps.maxItems : true)
+    }
+
+    return false;
+  };
+
+  // if条件のプロパティ名のうち、スキーマの固定プロパティ名と一致するものについて条件チェックを行う
+  const matchFlags = ifItem.pNames
+    .filter(pName => rootSchemaItem.pNames.includes(pName))
+    .map(pName => checkConditions(ifItem.pItems[pName] as JSONSchema7, formData[pName]));
+  
+  // 完全マッチのみthen
+  if (!matchFlags.includes(false) && allOfItem.then) {
+    mergeSchemaItem({ targetSchema: result, setSchema: allOfItem.then as JSONSchema7, formData });
+  } else if (allOfItem.else) {
+    mergeSchemaItem({ targetSchema: result, setSchema: allOfItem.else as JSONSchema7, formData });
   }
   return result;
 };
