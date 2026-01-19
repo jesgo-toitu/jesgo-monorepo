@@ -4,8 +4,6 @@
 import {
   JSONSchema7,
   JSONSchema7Definition,
-  JSONSchema7Object,
-  JSONSchema7Array,
 } from 'json-schema'; // eslint-disable-line import/no-unresolved
 import JSONPointer from 'jsonpointer';
 import lodash from 'lodash';
@@ -265,29 +263,43 @@ const mergeSchemaItem = (props: {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { setSchema, formData } = props;
 
-  // targetSchemaにsetSchemaを上書きマージ
-  // (root propertyごとにやっている理由は不明)
-  for (const itemName in setSchema) {
+  // targetSchemaにsetSchemaをroot props毎に上書きマージ
+  for (const itemName of Object.keys(setSchema)) {
     const setValue = setSchema[itemName as keyof JSONSchema7Definition];
     targetSchema = lodash.merge(targetSchema, { [itemName]: setValue });
   }
 
-  // 中身の解析
+  // propertiesの中身を解析してマージを修正
   if (targetSchema.properties && setSchema.properties) {
-    const setItem = getPropItemsAndNames(setSchema);
     const targetItem = getPropItemsAndNames(targetSchema);
+    const setItem = getPropItemsAndNames(setSchema);
+  
     setItem.pNames.forEach((pName: string) => {
-      const sItem = setItem.pItems[pName] as JSONSchema7;
       const tItem = targetItem.pItems[pName] as JSONSchema7;
+      const sItem = setItem.pItems[pName] as JSONSchema7;
 
-      // enum はマージではなく上書き
-      if (tItem?.enum && sItem?.enum) {
+      // enum はマージではなく上書き <仕様>
+      if (Array.isArray(tItem?.enum) && Array.isArray(sItem?.enum)) {
         tItem.enum = sItem.enum;
+      }
+
+      // 置き換え後のpropertiesへの対応($defsの中にif~then~elseがある場合など)
+      // オブジェクトプロパティも上書き
+      //
+      // <仕様>
+      // allOf: [if~then~else] で、複数の条件がマッチし、then/elseで同一のオブジェクトプロパティを定義している場合
+      // 先頭から一番最後に定義された条件が適用される
+      if (sItem.properties) {
+        // フィールド内のif~Thenを入力値に合わせて書き換え
+        targetItem.pItems[pName] = customSchemaIfThenElseOnField(
+          sItem,
+          formData[pName] ?? {}
+        );
       }
 
       // ユーザーが入力できない場合(readonly,jesgo:ui:hidden)はFormDataにdefaultを設定
       if (
-        tItem[Const.EX_VOCABULARY.UI_HIDDEN] === true ||
+        (tItem as any)[Const.EX_VOCABULARY.UI_HIDDEN] === true ||
         tItem.readOnly === true
       ) {
         const value = tItem.default;
@@ -348,7 +360,7 @@ export const transferSchemaItem = (
       if (Array.isArray(oneOfValue)) {
         // Type:stringにしないとCustomWidgetが反映されない
         result.type = 'string';
-        result[Const.EX_VOCABULARY.UI_LISTTYPE] = Const.JESGO_UI_LISTTYPE.COMBO;
+        (result as any)[Const.EX_VOCABULARY.UI_LISTTYPE] = Const.JESGO_UI_LISTTYPE.COMBO;
       }
     } else if (iName === 'allOf') {
       const allOfItems = result.allOf;
@@ -416,6 +428,7 @@ const customSchemaIfThenElse = (
   // 必要に応じて再帰的にcontainsの条件をチェック
   const checkArrayItemCondition = (contains: JSONSchema7, values: any[], depth: number): boolean => {
     if (contains.properties !== undefined) {
+      // contains: { properties: { ... } } 
       const containsItems = getPropItemsAndNames(contains);
 
       for (const item of values) {
@@ -432,6 +445,7 @@ const customSchemaIfThenElse = (
       }
       return false;
     } else {
+      // contains: { const/enum/pattern: ... }
       return values.some(item => checkConditions(contains, item, depth - 1));
     }
   };
@@ -445,56 +459,70 @@ const customSchemaIfThenElse = (
       return false;
     }
 
+    const conditionResults: boolean[] = [];
+
     if (conditonMaps.const !== undefined) {
-      // 厳密な型判断は行わない(例：10.0 = 10、"1" = 1 は許容)
       // null,undefinedもconstで比較する場合は空文字として扱う
-      return conditonMaps.const == (value ?? '');
-    } else if (conditonMaps.enum !== undefined) {
-      // snumも厳密な型判断は行わない(例：10.0 = 10、"1" = 1 は許容)
-      return Array.isArray(conditonMaps.enum) && conditonMaps.enum.some(item => item == value);
-    } else if (conditonMaps.pattern !== undefined) {
+      conditionResults.push(conditonMaps.const === (value ?? ''));
+    }
+    
+    if (conditonMaps.enum !== undefined) {
+      // null,undefinedもenumで比較する場合は空文字として扱う
+      conditionResults.push(Array.isArray(conditonMaps.enum) && conditonMaps.enum.some(item => item === (value ?? '')));
+    }
+    
+    if (conditonMaps.pattern !== undefined) {
       // パターンの正規表現にエラーがある場合はアンマッチ
       try {
         const pattern = new RegExp(conditonMaps.pattern);
-        return (value ?? '').toString().match(pattern) !== null;
+        conditionResults.push((value ?? '').toString().match(pattern) !== null);
       } catch {
-        return false;
+        conditionResults.push(false);
       }
-    } else if ( conditonMaps.minimum ?? conditonMaps.maximum ?? conditonMaps.exclusiveMinimum ?? conditonMaps.exclusiveMaximum ) {
+    }
+    
+    if ( conditonMaps.minimum ?? conditonMaps.maximum ?? conditonMaps.exclusiveMinimum ?? conditonMaps.exclusiveMaximum ) {
       const numValue = Number(value);
-      return !isNaN(numValue) &&
+      conditionResults.push(!isNaN(numValue) &&
         (conditonMaps.minimum !== undefined ? numValue >= conditonMaps.minimum : true) &&
         (conditonMaps.maximum !== undefined ? numValue <= conditonMaps.maximum : true) &&
         (conditonMaps.exclusiveMinimum !== undefined ? numValue > conditonMaps.exclusiveMinimum : true) &&
-        (conditonMaps.exclusiveMaximum !== undefined ? numValue < conditonMaps.exclusiveMaximum : true);
-    } else if (conditonMaps.not !== undefined) {
-      return !checkConditions(conditonMaps.not as JSONSchema7, value, depth - 1);
-    } else if (conditonMaps.properties !== undefined) {
-      // 下の階層を評価する(スキーマでのプロパティ規定の有無はチェックしない)
+        (conditonMaps.exclusiveMaximum !== undefined ? numValue < conditonMaps.exclusiveMaximum : true));
+    }
+    
+    if (conditonMaps.not !== undefined) {
+      conditionResults.push(!checkConditions(conditonMaps.not as JSONSchema7, value, depth - 1));
+    }
+    
+    if (conditonMaps.properties !== undefined) {
+      // 下の階層を評価する(親スキーマでのプロパティ規定の有無はチェックしない)
       const propItems = getPropItemsAndNames(conditonMaps);
-      if (Object.prototype.toString.call(value) !== '[object Object]') {
-        return false;
-      }
-      const matchFlags = propItems.pNames
-        .map(pName => checkConditions(propItems.pItems[pName] as JSONSchema7, value[pName], depth - 1));
-      return !matchFlags.includes(false);
-    } else if (conditonMaps.contains !== undefined) {
-      return Array.isArray(value) &&
-        checkArrayItemCondition(conditonMaps.contains as JSONSchema7, value, depth - 1);
-    } else if ( conditonMaps.minItems ?? conditonMaps.maxItems ) {
-      return Array.isArray(value) &&
+      conditionResults.push(Object.prototype.toString.call(value) === '[object Object]' &&
+        !propItems.pNames
+          .map(pName => checkConditions(propItems.pItems[pName] as JSONSchema7, value[pName], depth - 1))
+          .includes(false)
+        );
+    }
+
+    if (conditonMaps.contains !== undefined) {
+      conditionResults.push(Array.isArray(value) &&
+        checkArrayItemCondition(conditonMaps.contains as JSONSchema7, value, depth - 1));
+    }
+    
+    if ( conditonMaps.minItems ?? conditonMaps.maxItems ) {
+      conditionResults.push(Array.isArray(value) &&
         (conditonMaps.minItems !== undefined ? value.length >= conditonMaps.minItems : true) &&
-        (conditonMaps.maxItems !== undefined ? value.length <= conditonMaps.maxItems : true)
+        (conditonMaps.maxItems !== undefined ? value.length <= conditonMaps.maxItems : true));
     } 
 
-    return false;
+    return !conditionResults.includes(false);
   };
 
-  // スキーマで規定されていないプロパティは無視
+  // スキーマで規定されていないプロパティの参照は無視
   const matchFlags = ifItem.pNames
     .filter(pName => rootSchemaItem.pNames.includes(pName))
     .map(pName => checkConditions(ifItem.pItems[pName] as JSONSchema7, formData[pName]));
-  
+
   // 完全マッチのみがthenの適応
   if (!matchFlags.includes(false) && allOfItem.then) {
     mergeSchemaItem({ targetSchema: result, setSchema: allOfItem.then as JSONSchema7, formData });
@@ -580,7 +608,7 @@ const GetSchemaFromPropItem = (val: any, isArrayOfItem: boolean) => {
 
       schemaObj.items = GetSchemaFromPropItem(unionVal, true);
       // inline(横並び)で展開する
-      schemaObj.items[Const.EX_VOCABULARY.UI_SUBSCHEMA_STYLE] = 'inline';
+      (schemaObj.items as any)[Const.EX_VOCABULARY.UI_SUBSCHEMA_STYLE] = 'inline';
     } else if (val.length > 0) {
       // オブジェクト以外
       schemaObj.items = GetSchemaFromPropItem(val[0], true);
@@ -604,7 +632,7 @@ const GetSchemaFromPropItem = (val: any, isArrayOfItem: boolean) => {
   // フォームデータから生成したスキーマは編集不可とする
   schemaObj.readOnly = true;
   if (!isArrayOfItem) {
-    schemaObj[Const.EX_VOCABULARY.NOT_EXIST_PROP] = true;
+    (schemaObj as any)[Const.EX_VOCABULARY.NOT_EXIST_PROP] = true;
   }
 
   return schemaObj;
@@ -680,7 +708,7 @@ const customSchemaAppendFormDataProperty = (
                     // 配列の中身が全てスキーマ未定義の場合は配列自体を編集不可に
                     if (itemsSchema.properties && Object.keys(itemsSchema.properties).length === 0) {
                       (copySchema.properties[propName] as JSONSchema7).readOnly = true;
-                      (copySchema.properties[propName] as JSONSchema7)[Const.EX_VOCABULARY.NOT_EXIST_PROP] = true;
+                      (copySchema.properties[propName] as any)[Const.EX_VOCABULARY.NOT_EXIST_PROP] = true;
                     }
 
                     // 元スキーマのプロパティに追加
