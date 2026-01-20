@@ -497,9 +497,10 @@ const customSchemaIfThenElse = (
     if (conditonMaps.properties !== undefined) {
       // 下の階層を評価する(親スキーマでのプロパティ規定の有無はチェックしない)
       const propItems = getPropItemsAndNames(conditonMaps);
-      conditionResults.push(Object.prototype.toString.call(value) === '[object Object]' &&
+      const valueObject = Object.prototype.toString.call(value) === '[object Object]' ? value : {};
+      conditionResults.push(
         !propItems.pNames
-          .map(pName => checkConditions(propItems.pItems[pName] as JSONSchema7, value[pName], depth - 1))
+          .map(pName => checkConditions(propItems.pItems[pName] as JSONSchema7, valueObject[pName], depth - 1))
           .includes(false)
         );
     }
