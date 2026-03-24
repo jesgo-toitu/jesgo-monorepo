@@ -600,6 +600,7 @@ export const ControlButton = React.memo((props: ControlButtonProps) => {
           copyIds.splice(subschemaLastIdx + 1, 0, addItem);
 
           if (setDispSubSchemaIds) {
+            // #endregion
             setDispSubSchemaIds([...copyIds]);
           }
         } else {

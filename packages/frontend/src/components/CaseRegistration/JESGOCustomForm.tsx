@@ -1156,7 +1156,14 @@ const CustomDivForm = (props: CustomDivFormProp) => {
       });
     }
 
-    setFormData(data);
+    // 実際に変更があった場合のみ setFormData を呼び出す（無限ループ防止）
+    const currentFormDataStr = JSON.stringify(formData);
+    const newFormDataStr = JSON.stringify(data);
+    const hasChanged = currentFormDataStr !== newFormDataStr;
+    
+    if (hasChanged) {
+      setFormData(data);
+    }
 
     if (
       !isFirstOnChange ||

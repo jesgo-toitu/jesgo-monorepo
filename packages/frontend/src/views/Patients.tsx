@@ -1815,12 +1815,15 @@ const Patients = () => {
           const responseData = patientsResult.body as any;
           let patientList: PatientInfo[] = [];
           
-          // 総件数を設定
-          if (responseData.totalCount !== undefined) {
-            setTotalCount(responseData.totalCount);
-          } else {
-            // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-            setTotalCount(responseData.data?.length || 0);
+          // 総件数を設定（標準プリセットの場合のみ、カスタムプリセットの場合は後でformattedData.lengthを使用）
+          if (Number(selectedPresetId) === 1) {
+            // 標準プリセット（presetId=1）の場合、バックエンドから返されたtotalCountを使用
+            if (responseData.totalCount !== undefined) {
+              setTotalCount(responseData.totalCount);
+            } else {
+              // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
+              setTotalCount(responseData.data?.length || 0);
+            }
           }
           
           if (responseData && responseData.data && Array.isArray(responseData.data)) {
@@ -1905,7 +1908,11 @@ const Patients = () => {
             }
           }
 
-          setTotalCount(formattedData.length);
+          // カスタムプリセット（presetId > 1）の場合、表示行数（formattedData.length）をtotalCountに設定
+          // 標準プリセット（presetId = 1）の場合は、バックエンドから返されたtotalCountを使用（既に設定済み）
+          if (Number(selectedPresetId) !== 1) {
+            setTotalCount(formattedData.length);
+          }
           setPresetPatientData(formattedData);
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
@@ -1931,12 +1938,15 @@ const Patients = () => {
           const responseData = patientsResult.body as any;
           let patientList: PatientInfo[] = [];
           
-          // 総件数を設定
-          if (responseData.totalCount !== undefined) {
-            setTotalCount(responseData.totalCount);
-          } else {
-            // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-            setTotalCount(responseData.data?.length || 0);
+          // 総件数を設定（標準プリセットの場合のみ、カスタムプリセットの場合は後でformattedData.lengthを使用）
+          if (Number(selectedPresetId) === 1) {
+            // 標準プリセット（presetId=1）の場合、バックエンドから返されたtotalCountを使用
+            if (responseData.totalCount !== undefined) {
+              setTotalCount(responseData.totalCount);
+            } else {
+              // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
+              setTotalCount(responseData.data?.length || 0);
+            }
           }
           
           if (responseData && responseData.data && Array.isArray(responseData.data)) {
@@ -2017,7 +2027,11 @@ const Patients = () => {
             }
           }
 
-          setTotalCount(formattedData.length);
+          // カスタムプリセット（presetId > 1）の場合、表示行数（formattedData.length）をtotalCountに設定
+          // 標準プリセット（presetId = 1）の場合は、バックエンドから返されたtotalCountを使用（既に設定済み）
+          if (Number(selectedPresetId) !== 1) {
+            setTotalCount(formattedData.length);
+          }
           setPresetPatientData(formattedData);
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
