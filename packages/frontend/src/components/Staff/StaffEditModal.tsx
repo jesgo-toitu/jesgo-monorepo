@@ -10,6 +10,7 @@ import {
   ControlLabel,
   FormControl,
   FormGroup,
+  Checkbox,
 } from 'react-bootstrap';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
 import {
@@ -24,6 +25,21 @@ import ModalDialog from '../common/ModalDialog';
 import './StaffEditModal.css';
 import { staffData } from './StaffData';
 import { useNavigate } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
+
+const toBooleanFlag = (value: unknown): boolean =>
+  value === true || value === 'true' || value === 't' || value === 1 || value === '1';
+
+/** react-bootstrap の Checkbox はラベルクリックで state がずれることがあるため、保存時は DOM を正とする */
+const readHideSaveConfirmFromDom = (fallback: boolean): boolean => {
+  const el = document.getElementById(
+    'chkHideSaveConfirm'
+  ) as HTMLInputElement | null;
+  if (el && typeof el.checked === 'boolean') {
+    return el.checked;
+  }
+  return fallback === true;
+};
 
 export const StaffEditModalDialog = (props: {
   onHide: () => void;
@@ -41,6 +57,7 @@ export const StaffEditModalDialog = (props: {
   const [password, setPassword] = useState<string>('');
   const [passwordConfilm, setPasswordConfilm] = useState<string>('');
   const [roll, setRoll] = useState<number>(-1);
+  const [hideSaveConfirm, setHideSaveConfirm] = useState<boolean>(false);
 
   const [errShow, setErrShow] = useState(false);
   const [message, setMessage] = useState<string>('');
@@ -50,6 +67,7 @@ export const StaffEditModalDialog = (props: {
   const [rollMaster, setRollMaster] = useState<RollMaster[]>([]);
 
   const navigate = useNavigate();
+  const dispatch = useDispatch();
 
   // 権限マスタ取得
   const ReadRollMaster = async () => {
@@ -67,20 +85,26 @@ export const StaffEditModalDialog = (props: {
     };
   };
 
+  // モーダルを開いたときだけ初期化する。開いている最中に data 参照が変わってもチェックを戻さない
   useEffect(() => {
+    if (!show) return;
     if (data !== undefined) {
       setUserId(data.user_id);
       setLoginId(data.name);
       setDisplayName(data.display_name);
       setRoll(data.roll_id);
+      setHideSaveConfirm(toBooleanFlag(data.hide_save_confirm));
     } else {
       setUserId(-1);
       setLoginId('');
       setDisplayName('');
       setRoll(-1);
+      setHideSaveConfirm(false);
     }
     setPassword('');
     setPasswordConfilm('');
+    // data は show が true になった時点の props を使う
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
   useEffect(() => {
@@ -187,12 +211,15 @@ export const StaffEditModalDialog = (props: {
 
     if (hasInputError(true)) return;
 
+    const hideSaveConfirmValue = readHideSaveConfirmFromDom(hideSaveConfirm);
+
     // jesgo_user list
     const returnApiObject = await apiAccess(METHOD_TYPE.POST, `signup/`, {
       name: loginId,
       display_name: displayName,
       password,
       roll_id: roll,
+      hide_save_confirm: hideSaveConfirmValue,
     });
     if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
       // eslint-disable-next-line no-alert
@@ -212,6 +239,8 @@ export const StaffEditModalDialog = (props: {
   const updateUser = async () => {
     if (hasInputError(false)) return;
 
+    const hideSaveConfirmValue = readHideSaveConfirmFromDom(hideSaveConfirm);
+
     // jesgo_user list
     const returnApiObject = await apiAccess(METHOD_TYPE.POST, `editUser/`, {
       user_id: userId,
@@ -219,8 +248,21 @@ export const StaffEditModalDialog = (props: {
       display_name: displayName,
       password,
       roll_id: roll,
+      hide_save_confirm: hideSaveConfirmValue,
     });
     if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
+      // 編集対象がログイン中ユーザーなら、症例編集への反映のため localStorage / Redux も更新する
+      if (localStorage.getItem('user_id') === userId.toString()) {
+        localStorage.setItem(
+          'hide_save_confirm',
+          hideSaveConfirmValue.toString()
+        );
+        dispatch({
+          type: 'SAVE_MESSAGE_STATE',
+          isHiddenSaveMassage: hideSaveConfirmValue,
+          isSaveAfterTabbing: hideSaveConfirmValue,
+        });
+      }
       // eslint-disable-next-line no-alert
       alert('更新しました');
       onOk();
@@ -301,6 +343,21 @@ export const StaffEditModalDialog = (props: {
                   <option value={item.roll_id}>{item.title}</option>
                 ))}
             </FormControl>
+          </FormGroup>
+          <FormGroup>
+            <Checkbox
+              id="chkHideSaveConfirm"
+              checked={hideSaveConfirm}
+              onChange={(event: React.FormEvent<Checkbox>) => {
+                const target = event.target as HTMLInputElement;
+                setHideSaveConfirm(target.checked === true);
+              }}
+            >
+              症例編集中の保存確認を表示しない
+            </Checkbox>
+            <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+              チェックすると、症例保存時の確認ダイアログ（「以降、この症例の編集中に保存については確認しない」）が表示されなくなります。
+            </p>
           </FormGroup>
           <FormGroup controlId="password">
             <ControlLabel>

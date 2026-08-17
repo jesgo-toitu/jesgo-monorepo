@@ -112,6 +112,7 @@ export interface dispUser {
   password_hash: string;
   roll_id: number;
   deleted: boolean;
+  hide_save_confirm?: boolean;
 }
 
 export interface localStorageObject {
@@ -129,6 +130,7 @@ export interface localStorageObject {
   is_plugin_executable_update: boolean;
   is_data_manage_roll: boolean;
   is_system_manage_roll: boolean;
+  hide_save_confirm: boolean;
 }
 
 interface rollAuth {
@@ -169,6 +171,9 @@ export type JesgoUserRoll = {
 export interface userObject extends dispUser {
   password: string;
 }
+
+export const toHideSaveConfirm = (value: unknown): boolean =>
+  value === true || value === 'true' || value === 't' || value === 1 || value === '1';
 
 export const roll = {
   login: 'login',
@@ -215,13 +220,15 @@ const hasUserRollIdMaster = async (roll_id: number) => {
  * @param display_name 表示名
  * @param password パスワード(平文)
  * @param roll_id ロール種別
+ * @param hide_save_confirm 症例保存確認ダイアログを表示しない場合は true
  * @returns ApiReturnObject
  */
 export const signUpUser = async (
   name: string,
   display_name: string,
   password: string,
-  roll_id: number
+  roll_id: number,
+  hide_save_confirm = false
 ): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'signUpUser');
 
@@ -298,16 +305,16 @@ export const signUpUser = async (
           'signUpUser'
         );
         ret = await dbAccess.query(
-          'UPDATE jesgo_user set name = $1, display_name = $2, password_hash = $3, roll_id = $4, deleted = false WHERE user_id = $5',
-          [name, display_name, hashedPassword, Number(roll_id), updateId]
+          'UPDATE jesgo_user set name = $1, display_name = $2, password_hash = $3, roll_id = $4, deleted = false, hide_save_confirm = $5 WHERE user_id = $6',
+          [name, display_name, hashedPassword, Number(roll_id), hide_save_confirm, updateId]
         );
         await dbAccess.end();
       } else {
         //insert
         logging(LOGTYPE.INFO, 'User insert', 'Users', 'signUpUser');
         ret = await dbAccess.query(
-          'INSERT INTO jesgo_user (name, display_name, password_hash, roll_id) VALUES ($1, $2, $3, $4)',
-          [name, display_name, hashedPassword, Number(roll_id)]
+          'INSERT INTO jesgo_user (name, display_name, password_hash, roll_id, hide_save_confirm) VALUES ($1, $2, $3, $4, $5)',
+          [name, display_name, hashedPassword, Number(roll_id), hide_save_confirm]
         );
         await dbAccess.end();
       }
@@ -406,9 +413,16 @@ export const editUserProfile = async (
   name: string,
   display_name: string,
   password: string,
-  roll_id: number
+  roll_id: number,
+  hide_save_confirm = false
 ): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'editUserProfile');
+  logging(
+    LOGTYPE.DEBUG,
+    `user_id=${user_id}, hide_save_confirm=${hide_save_confirm}`,
+    'Users',
+    'editUserProfile'
+  );
 
   let result = RESULT.NORMAL_TERMINATION;
 
@@ -427,8 +441,9 @@ export const editUserProfile = async (
 
       //update文を発行
       const ret = await dbAccess.query(
-        'UPDATE jesgo_user SET display_name = $1, password_hash = $2, roll_id = $3 WHERE user_id = $4',
-        [display_name, hashedPassword, roll_id, user_id]
+        'UPDATE jesgo_user SET display_name = $1, password_hash = $2, roll_id = $3, hide_save_confirm = $4 WHERE user_id = $5',
+        [display_name, hashedPassword, roll_id, hide_save_confirm, user_id],
+        'update'
       );
       await dbAccess.end();
       if (ret != null) {
@@ -448,20 +463,28 @@ export const editUserProfile = async (
       result = RESULT.FAILED_USER_ERROR;
     }
   } else {
-    const ret = await dbAccess.query(
-      'UPDATE jesgo_user SET display_name = $1, roll_id = $2 WHERE user_id = $3',
-      [display_name, roll_id, user_id]
-    );
-    await dbAccess.end();
-    if (ret != null) {
-      logging(
-        LOGTYPE.INFO,
-        'editUserProfile success',
-        'Users',
-        'editUserProfile'
+    try {
+      const ret = await dbAccess.query(
+        'UPDATE jesgo_user SET display_name = $1, roll_id = $2, hide_save_confirm = $3 WHERE user_id = $4',
+        [display_name, roll_id, hide_save_confirm, user_id],
+        'update'
       );
-    } else {
+      await dbAccess.end();
+      if (ret != null) {
+        logging(
+          LOGTYPE.INFO,
+          `editUserProfile success hide_save_confirm=${hide_save_confirm}`,
+          'Users',
+          'editUserProfile'
+        );
+      } else {
+        result = RESULT.FAILED_USER_ERROR;
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '不明なエラー';
+      logging(LOGTYPE.ERROR, errorMessage, 'Users', 'editUserProfile');
       result = RESULT.FAILED_USER_ERROR;
+      await dbAccess.end();
     }
   }
   return { statusNum: result, body: null };
@@ -688,7 +711,7 @@ export const loginUser = async (
   const plainPassword = password + envVariables.passwordSalt;
   await dbAccess.connectWithConf();
   const ret = (await dbAccess.query(
-    'SELECT user_id, name, display_name, roll_id, password_hash FROM jesgo_user WHERE name = $1',
+    'SELECT user_id, name, display_name, roll_id, password_hash, hide_save_confirm FROM jesgo_user WHERE name = $1',
     [name]
   )) as dispUser[];
   if (ret.length === 0) {
@@ -727,6 +750,7 @@ export const loginUser = async (
       is_plugin_executable_update: roll[0].plugin_executable_update,
       is_data_manage_roll: roll[0].data_manage,
       is_system_manage_roll: roll[0].system_manage,
+      hide_save_confirm: toHideSaveConfirm(ret[0].hide_save_confirm),
     };
     const tokens = generateTokens(ret[0]);
     returnObj.token = tokens.token;
@@ -785,6 +809,7 @@ export interface dbRow {
   displayName: string;
   rollId: number;
   rolltitle: string;
+  hide_save_confirm?: boolean;
 }
 
 export interface searchUserRequest extends ParsedQs {
@@ -802,7 +827,7 @@ export const searchUser = async (): Promise<ApiReturnObject> => {
   await dbAccess.connectWithConf();
   const dbRows: dbRow[] = (await dbAccess.query(
     `SELECT 
-    u.user_id, u.name, u.display_name, u.roll_id, m.title as rolltitle
+    u.user_id, u.name, u.display_name, u.roll_id, u.hide_save_confirm, m.title as rolltitle
     FROM jesgo_user u LEFT JOIN jesgo_user_roll m
     ON u.roll_id = m.roll_id
     WHERE u.deleted = false and u.roll_id <> 999 and  u.name <> 'system' and u.name <> 'systemuser'
@@ -811,7 +836,11 @@ export const searchUser = async (): Promise<ApiReturnObject> => {
   await dbAccess.end();
 
   logging(LOGTYPE.DEBUG, `rowLength = ${dbRows.length}`, 'Users', 'searchUser');
-  return { statusNum: RESULT.NORMAL_TERMINATION, body: { data: dbRows } };
+  const users = dbRows.map((row) => ({
+    ...row,
+    hide_save_confirm: toHideSaveConfirm(row.hide_save_confirm),
+  }));
+  return { statusNum: RESULT.NORMAL_TERMINATION, body: { data: users } };
 };
 
 /**

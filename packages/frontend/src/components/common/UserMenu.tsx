@@ -52,6 +52,7 @@ export const UserMenu = (props: {
     localStorage.removeItem('is_plugin_executable_update');
     localStorage.removeItem('is_data_manage_roll');
     localStorage.removeItem('is_system_manage_roll');
+    localStorage.removeItem('hide_save_confirm');
     
     // プリセットIDは保持（次回ログイン時に使用）
     // localStorage.removeItem('selected_preset_id'); // コメントアウト：保持する

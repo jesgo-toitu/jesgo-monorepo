@@ -51,6 +51,7 @@ services:
       - ./packages/backend/doc/DB/batch/ver150/06_create_function_search_jesgo_document_multiple.sql:/docker-entrypoint-initdb.d/27_ver150_06_create_function_search_jesgo_document_multiple.sql
       - ./packages/backend/doc/DB/batch/ver150/07_create_function_get_jesgo_document.sql:/docker-entrypoint-initdb.d/28_ver150_07_create_function_get_jesgo_document.sql
       - ./packages/backend/doc/DB/batch/ver150/08_create_function_get_jesgo_filtered_root_document.sql:/docker-entrypoint-initdb.d/29_ver150_08_create_function_get_jesgo_filtered_root_document.sql
+      - ./packages/backend/doc/DB/batch/ver150/09_alter_jesgo_user_hide_save_confirm.sql:/docker-entrypoint-initdb.d/30_ver150_09_alter_jesgo_user_hide_save_confirm.sql
     networks:
       - jesgo-network
     healthcheck:

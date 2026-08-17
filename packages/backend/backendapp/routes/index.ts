@@ -20,6 +20,7 @@ import {
   getUserRollList,
   saveUserRoll,
   JesgoUserRoll,
+  toHideSaveConfirm,
 } from '../services/Users';
 import {
   deletePatient,
@@ -261,7 +262,13 @@ router.post('/signup/', async (req, res, next) => {
       return;
     }
     
-    signUpUser(body.name, body.display_name, body.password, body.roll_id)
+    signUpUser(
+      body.name,
+      body.display_name,
+      body.password,
+      body.roll_id,
+      toHideSaveConfirm(body.hide_save_confirm)
+    )
       .then((result) => res.status(200).send(result))
       .catch(next);
   }
@@ -378,12 +385,19 @@ router.post('/editUser/', async (req, res, next) => {
       return;
     }
     
+    logging(
+      LOGTYPE.DEBUG,
+      `hide_save_confirm受信値=${JSON.stringify(body.hide_save_confirm)}`,
+      'router',
+      '/editUser'
+    );
     editUserProfile(
       body.user_id,
       body.name,
       body.display_name,
       body.password,
-      body.roll_id
+      body.roll_id,
+      toHideSaveConfirm(body.hide_save_confirm)
     )
       .then((result) => res.status(200).send(result))
       .catch(next);

@@ -12,9 +12,6 @@ import { ReadStaffList } from '../../common/DBUtility';
 import { staffData } from './StaffData';
 import { StaffEditModalDialog } from './StaffEditModal';
 
-let insert = false;
-let srcData: staffData | undefined;
-
 const makeTable = (props: {
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
 }) => {
@@ -22,6 +19,8 @@ const makeTable = (props: {
 
   const navigate = useNavigate();
   const [show, setShow] = useState(false);
+  const [insert, setInsert] = useState(false);
+  const [srcData, setSrcData] = useState<staffData | undefined>(undefined);
   const [staffList, setStaffList] = useState<staffData[]>([]);
   const [update, setUpdate] = useState(false);
 
@@ -38,13 +37,13 @@ const makeTable = (props: {
   }, [update]);
 
   const addStaff = () => {
-    insert = true;
-    srcData = undefined;
+    setInsert(true);
+    setSrcData(undefined);
     setShow(true);
   };
   const editStaff = (data: staffData) => {
-    insert = false;
-    srcData = data;
+    setInsert(false);
+    setSrcData(data);
     setShow(true);
   };
 

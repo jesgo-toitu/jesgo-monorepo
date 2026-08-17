@@ -26,6 +26,7 @@ export interface localStorageObject {
   is_plugin_executable_update: boolean;
   is_data_manage_roll: boolean;
   is_system_manage_roll: boolean;
+  hide_save_confirm: boolean;
 }
 
 export const Login = () => {
@@ -109,6 +110,15 @@ export const Login = () => {
         'is_system_manage_roll',
         localStorageObj.is_system_manage_roll.toString()
       );
+      localStorage.setItem(
+        'hide_save_confirm',
+        (localStorageObj.hide_save_confirm === true).toString()
+      );
+      dispatch({
+        type: 'SAVE_MESSAGE_STATE',
+        isHiddenSaveMassage: localStorageObj.hide_save_confirm === true,
+        isSaveAfterTabbing: localStorageObj.hide_save_confirm === true,
+      });
 
       // スキーマ取得処理
       await storeSchemaInfo(dispatch);

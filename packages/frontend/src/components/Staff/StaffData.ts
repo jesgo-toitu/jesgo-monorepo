@@ -4,6 +4,7 @@ export type staffData = {
   display_name: string;
   roll_id: number;
   rolltitle: string;
+  hide_save_confirm?: boolean;
 };
 
 export default staffData;

@@ -38,22 +38,33 @@ export interface commonAction {
   };
 }
 
-const createInitialState = (): commonState => ({
-  scrollTop: 0,
-  isHiddenSaveMassage: false,
-  isSaveAfterTabbing: false,
-  isShownSaveMessage: false,
-  isJesgoRequiredHighlight: {
-    jsog: false,
-    jsgoe: false,
-    others: false
-  },
-  pluginList: undefined,
-  topMenuInfo: {
-    paramString: '',
-    isDetail: false,
-  },
-});
+const getHideSaveConfirmFromStorage = (): boolean => {
+  try {
+    return localStorage.getItem('hide_save_confirm') === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const createInitialState = (): commonState => {
+  const hideSaveConfirm = getHideSaveConfirmFromStorage();
+  return {
+    scrollTop: 0,
+    isHiddenSaveMassage: hideSaveConfirm,
+    isSaveAfterTabbing: hideSaveConfirm,
+    isShownSaveMessage: false,
+    isJesgoRequiredHighlight: {
+      jsog: false,
+      jsgoe: false,
+      others: false
+    },
+    pluginList: undefined,
+    topMenuInfo: {
+      paramString: '',
+      isDetail: false,
+    },
+  };
+};
 
 const initialState: commonState = createInitialState();
 
