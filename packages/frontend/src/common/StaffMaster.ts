@@ -11,7 +11,16 @@ export type RollMaster = {
 
 export const Roll = {
   ROLL_ID_SYSTEM: 0,
+  ROLL_ID_OPERATOR: 1,
+  ROLL_ID_ADVANCED: 100,
 } as const;
+
+/** 設定メニューの「プリセット管理」を表示できるロール */
+export const PRESET_MANAGER_ROLL_IDS: readonly number[] = [
+  Roll.ROLL_ID_SYSTEM,
+  Roll.ROLL_ID_OPERATOR,
+  Roll.ROLL_ID_ADVANCED,
+];
 
 export const DISPLAYNAME_MAX_LENGTH = 20;
 
