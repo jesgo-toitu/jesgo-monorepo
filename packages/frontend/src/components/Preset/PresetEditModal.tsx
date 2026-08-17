@@ -277,8 +277,11 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
         const treeApiReturnObject = await apiAccess(METHOD_TYPE.GET, `gettree`);
         if (treeApiReturnObject.statusNum === RESULT.NORMAL_TERMINATION) {
           const returned = treeApiReturnObject.body as treeApiObject;
-          setAvailableSchemas(returned.treeSchema);
-          setAvailableCommonSchemas(returned.commonTreeSchema);
+          // APIが配列を返さない場合でも描画時の sort で落ちないように空配列へフォールバックする
+          setAvailableSchemas(Array.isArray(returned.treeSchema) ? returned.treeSchema : []);
+          setAvailableCommonSchemas(
+            Array.isArray(returned.commonTreeSchema) ? returned.commonTreeSchema : []
+          );
         }
       } catch (error) {
         console.error('スキーマツリーの取得に失敗しました:', error);
@@ -1303,14 +1306,18 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
             >
               <option value="">スキーマを選択してください</option>
               <optgroup label="ルート">
-                {availableSchemas.sort((a, b) => a.schema_id - b.schema_id).map((schema) => (
+                {[...(availableSchemas ?? [])]
+                  .sort((a, b) => a.schema_id - b.schema_id)
+                  .map((schema) => (
                   <option key={schema.schema_id} value={schema.schema_id}>
                     {schema.schema_title}
                   </option>
                 ))}
               </optgroup>
               <optgroup label="共通">
-                {availableCommonSchemas.sort((a, b) => a.schema_id - b.schema_id).map((schema) => (
+                {[...(availableCommonSchemas ?? [])]
+                  .sort((a, b) => a.schema_id - b.schema_id)
+                  .map((schema) => (
                   <option key={schema.schema_id} value={schema.schema_id}>
                     {schema.schema_title}
                   </option>
