@@ -1,9 +1,10 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import ButtonToolbar from 'react-bootstrap/lib/ButtonToolbar';
 import DropdownButton from 'react-bootstrap/lib/DropdownButton';
 import MenuItem from 'react-bootstrap/lib/MenuItem';
 import { useNavigate } from 'react-router-dom';
 import { RemoveBeforeUnloadEvent } from '../../common/CommonUtility';
+import { PRESET_MANAGER_ROLL_IDS } from '../../common/StaffMaster';
 
 export const SystemMenu = (props: {
   title: string;
@@ -83,10 +84,28 @@ export const SystemMenu = (props: {
     }
   };
 
+  const canAccessPresetManager = PRESET_MANAGER_ROLL_IDS.includes(
+    Number(localStorage.getItem('roll_id'))
+  );
+
   const handlPresetManager = () => {
     if (isConfirm === null || isConfirm()) {
-      // プラグイン登録と同様の権限設定
-      checkAuth('is_plugin_registerable', '/PresetManager');
+      // プラグイン登録権限ではなく、システム管理者・上級ユーザのみ遷移を許可する
+      if (!canAccessPresetManager) {
+        // eslint-disable-next-line no-alert
+        alert('権限がありません');
+        return;
+      }
+
+      if (
+        isTransitionOk &&
+        !isTransitionOk()
+      ) {
+        return;
+      }
+
+      RemoveBeforeUnloadEvent();
+      navigate('/PresetManager');
     }
   };
 
