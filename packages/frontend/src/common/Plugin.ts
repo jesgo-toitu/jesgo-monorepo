@@ -92,8 +92,23 @@ interface IPluginModule {
   ) => Promise<unknown>;
 }
 
-export const GetModule: (scriptText: string) => Promise<IPluginModule> = async (
-  scriptText: string
+/**
+ * プラグインのスクリプトをモジュールとして読み込む
+ *
+ * ブラウザの動的importはESMしか解釈できないため、
+ * CommonJS形式(module.exports)のスクリプトは必ず読み込みに失敗する。
+ * (v1.6.0以降、バックエンドはCommonJS形式のプラグインの登録を拒否するが、
+ *  それ以前に登録されたプラグインがDBに残っている可能性がある)
+ * @param scriptText プラグインのスクリプト
+ * @param suppressAlert trueの場合、読み込み失敗時にアラートを表示しない(呼び出し元でまとめて通知する)
+ * @returns プラグインモジュール。読み込みに失敗した場合はundefined
+ */
+export const GetModule: (
+  scriptText: string,
+  suppressAlert?: boolean
+) => Promise<IPluginModule> = async (
+  scriptText: string,
+  suppressAlert = false
 ) => {
   // バックエンドから読み込み予定のスクリプト文字列
   const readScriptText = Buffer.from(scriptText).toString('base64');
@@ -106,10 +121,12 @@ export const GetModule: (scriptText: string) => Promise<IPluginModule> = async (
     ); // webpackIgnoreコメント必要
     return pluginmodule;
   } catch (e) {
-    // eslint-disable-next-line no-alert
-    alert(
-      `【pluginの実行処理中にエラーが発生しました】\n${(e as Error).message}`
-    );
+    if (!suppressAlert) {
+      // eslint-disable-next-line no-alert
+      alert(
+        `【pluginの実行処理中にエラーが発生しました】\n${(e as Error).message}`
+      );
+    }
     console.error(e as Error);
     return undefined as unknown as IPluginModule;
   }

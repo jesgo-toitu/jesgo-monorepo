@@ -24,15 +24,15 @@ JESGOは医療情報を管理するWebアプリケーションです。このリ
 ## システム要件
 
 ### 開発環境
-- Node.js 20.x 以上
-- npm 10.x 以上
+- Node.js 24.x 以上
+- npm 11.x 以上
 - Docker & Docker Compose（開発時）
 - PostgreSQL 14.x（ローカル開発時）
 - Git
 
 ### 本番環境（Windows）
 - Windows 10/11 または Windows Server 2019/2022
-- Node.js 20.x 以上
+- Node.js 24.x 以上（本番環境でも必須）
 - PostgreSQL 14.x 以上
 
 ## プロジェクト構成
@@ -546,12 +546,12 @@ chore: その他の変更
 #### 1. Node.js バージョンエラー
 
 ```bash
-# Node.js 20をインストール
-nvm install 20
-nvm use 20
+# Node.js 24をインストール
+nvm install 24
+nvm use 24
 
 # バージョン確認
-node --version  # v20.x.x
+node --version  # v24.x.x
 ```
 
 #### 2. 依存関係の問題

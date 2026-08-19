@@ -1102,11 +1102,11 @@ router.post('/deletePlugin/', async (req, res, next) => {
     res.status(200).send(authResult);
   }
   if (authResult.body) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const body: { data: { plugin_id: number } } = req.body as {
-      data: { plugin_id: number };
-    };
-    deletePlugin(body.data.plugin_id)
+    // フロントエンドは { plugin_id: N } をそのまま送信するため req.body から直接読む。
+    // 以前は req.body.data.plugin_id を参照しており、req.body.data が undefined となって
+    // 必ず TypeError (HTTP 500) になり、画面からプラグインを削除できなかった。
+    const body: { plugin_id: number } = req.body as { plugin_id: number };
+    deletePlugin(body.plugin_id)
       .then((result) => res.status(200).send(result))
       .catch(next);
   }

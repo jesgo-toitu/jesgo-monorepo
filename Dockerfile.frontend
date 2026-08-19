@@ -1,5 +1,5 @@
 # Frontend Dockerfile
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 
 # Install system dependencies including bash for Cursor compatibility
 RUN apk add --no-cache bash

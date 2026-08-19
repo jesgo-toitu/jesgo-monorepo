@@ -1,5 +1,5 @@
 # JESGO Windows Deployment Script
-# Node.js 20 + PostgreSQL 14 環境向け
+# Node.js 24 + PostgreSQL 14 環境向け
 
 param(
     [string]$Environment = "production",
@@ -24,14 +24,14 @@ try {
     $nodeVersion = node --version
     Write-Host "Node.js version: $nodeVersion" -ForegroundColor Green
     
-    # Node.js 20以上かチェック
+    # Node.js 24以上かチェック
     $versionNumber = [int]($nodeVersion -replace 'v(\d+)\..*', '$1')
-    if ($versionNumber -lt 20) {
-        throw "Node.js version 20 or higher is required. Current version: $nodeVersion"
+    if ($versionNumber -lt 24) {
+        throw "Node.js version 24 or higher is required. Current version: $nodeVersion"
     }
 } catch {
     Write-Host "Error: Node.js not found or version check failed" -ForegroundColor Red
-    Write-Host "Please install Node.js 20 or higher from https://nodejs.org/" -ForegroundColor Yellow
+    Write-Host "Please install Node.js 24 or higher from https://nodejs.org/" -ForegroundColor Yellow
     exit 1
 }
 
