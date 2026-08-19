@@ -149,7 +149,7 @@ const config = loadFrontendConfig({
 
 ### 設定ファイルのテンプレート
 
-リポジトリルートに `config.template.json` があります：
+`packages/settings/config.template.json` がテンプレートです（このファイルがアプリケーションの読み込み対象です）：
 
 ```json
 {

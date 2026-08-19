@@ -10,17 +10,6 @@ RUN apk add --no-cache \
     openssh \
     bash
 
-# Install dependencies only when needed
-FROM base AS deps
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-COPY packages/backend/package*.json ./packages/backend/
-
-# Install dependencies
-RUN npm install --only=production && npm cache clean --force
-
 # Development stage
 FROM base AS dev
 WORKDIR /app

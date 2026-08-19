@@ -8,7 +8,7 @@ JESGOプロジェクトのバックエンドAPIサーバーです。
 
 `backendapp/config/config.json` に設定ファイルを配置してください。
 
-テンプレートは `/config.template.json` を参照してください。
+テンプレートは `packages/settings/config.template.json` を参照してください（このファイルがアプリケーションの読み込み対象です）。
 
 ```json
 {
