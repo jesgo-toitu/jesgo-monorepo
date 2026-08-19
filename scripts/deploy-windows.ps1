@@ -1,5 +1,5 @@
 # JESGO Windows Deployment Script
-# Node.js 24 + PostgreSQL 14 環境向け
+# Node.js 24 + PostgreSQL 17 環境向け
 
 param(
     [string]$Environment = "production",
@@ -43,7 +43,7 @@ if (-not $SkipDatabase) {
         Write-Host "PostgreSQL version: $pgVersion" -ForegroundColor Green
     } catch {
         Write-Host "Warning: PostgreSQL not found in PATH" -ForegroundColor Yellow
-        Write-Host "Please ensure PostgreSQL 14 is installed and accessible" -ForegroundColor Yellow
+        Write-Host "Please ensure PostgreSQL 17 is installed and accessible" -ForegroundColor Yellow
     }
 }
 

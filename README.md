@@ -27,13 +27,13 @@ JESGOは医療情報を管理するWebアプリケーションです。このリ
 - Node.js 24.x 以上
 - npm 11.x 以上
 - Docker & Docker Compose（開発時）
-- PostgreSQL 14.x（ローカル開発時）
+- PostgreSQL 17.x（ローカル開発時。検証済み: 17.11）
 - Git
 
 ### 本番環境（Windows）
 - Windows 10/11 または Windows Server 2019/2022
 - Node.js 24.x 以上（本番環境でも必須）
-- PostgreSQL 14.x 以上
+- PostgreSQL 17.x（検証済み: 17.11）
 
 ## プロジェクト構成
 
@@ -95,7 +95,7 @@ npm run docker:dev
 ### ローカル開発（Dockerなし）
 
 ```bash
-# 1. PostgreSQL 14をインストール・起動
+# 1. PostgreSQL 17をインストール・起動
 
 # 2. 依存関係のインストール
 npm install
