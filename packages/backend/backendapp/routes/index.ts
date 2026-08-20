@@ -91,7 +91,6 @@ const upload = multer({ dest: 'uploads/' });
  */
 router.post('/login/', (req, res, next) => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'router', '/login');
-  logging(LOGTYPE.DEBUG, `リクエストボディ: ${JSON.stringify(req.body)}`, 'router', '/login');
   
   // フロントエンドからのリクエスト構造に対応
   let body: userObject;
@@ -106,7 +105,13 @@ router.post('/login/', (req, res, next) => {
   logging(LOGTYPE.DEBUG, `ユーザー名: ${body.name}, パスワード: ${body.password ? '[設定済み]' : '[未設定]'}`, 'router', '/login');
   loginUser(body.name, body.password)
     .then((result) => {
-      logging(LOGTYPE.DEBUG, `ログイン結果: ${JSON.stringify(result)}`, 'router', '/login');
+      // resultにはJWTとリフレッシュトークンが含まれるため全文は出力しない
+      logging(
+        LOGTYPE.DEBUG,
+        `ログイン結果: statusNum=${result.statusNum}`,
+        'router',
+        '/login'
+      );
       res.status(200).send(result);
     })
     .catch((error) => {

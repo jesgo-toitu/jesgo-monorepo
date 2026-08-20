@@ -69,6 +69,7 @@ services:
     container_name: jesgo-backend-dev
     environment:
       NODE_ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-}
       PORT: 8000
       DB_HOST: postgres
       DB_PORT: 5432
