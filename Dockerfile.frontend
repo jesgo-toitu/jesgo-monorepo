@@ -1,19 +1,8 @@
 # Frontend Dockerfile
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 
 # Install system dependencies including bash for Cursor compatibility
 RUN apk add --no-cache bash
-
-# Install dependencies only when needed
-FROM base AS deps
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-COPY packages/frontend/package*.json ./packages/frontend/
-
-# Install dependencies
-RUN npm install --only=production && npm cache clean --force
 
 # Development stage
 FROM base AS dev

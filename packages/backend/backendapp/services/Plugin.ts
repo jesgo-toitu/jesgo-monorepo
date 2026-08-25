@@ -34,7 +34,8 @@ import * as jsonpointer from 'jsonpointer';
 import { getItemsAndNames, JSONSchema7 } from './JsonToDatabase';
 import { getPropertyNameFromTag } from './SearchPatient';
 import { ParsedQs } from 'qs';
-import { parse } from 'acorn';
+import { parse, Program } from 'acorn';
+import { pathToFileURL } from 'url';
 
 export interface PackageDocumentRequest {
   jesgoCaseList: jesgoCaseDefine[];
@@ -446,13 +447,69 @@ type initValueInfo = {
 };
 
 /**
+ * プラグイン(ESM形式のJS)を動的importで読み込むための関数を生成する。
+ *
+ * ■ なぜ new Function を経由しているのか（tsconfig.json を変更する際は必ず読むこと）
+ * backend の tsconfig.json は "module": "commonjs" である。この設定下では、
+ * TypeScript はソース中の動的 import() を require() へ降格変換してしまう。
+ * プラグインは ESM 形式(export async function init ...)で記述されるため、
+ * require() では読み込めず SyntaxError になる。
+ * そこで TypeScript の変換対象にならない形(Function 経由)で動的 import を生成している。
+ * 任意のコードを評価する目的ではなく、生成しているのは常に固定の import 文のみである。
+ * 将来 tsconfig.json の "module" を ESM 系に変更した場合、この回避策は不要になり、
+ * 素の await import(url) に置き換えてよい。
+ *
+ * 旧実装では npm パッケージ esm を使用していたが、esm は Node 22 以降で動作しないため
+ * Node 標準の動的 import に置き換えた(v1.6.0 / Issue #9)。
+ */
+const importPluginModule = new Function('url', 'return import(url);') as (
+  url: string
+) => Promise<IPluginModule>;
+
+/**
+ * プラグインのソースがESM形式(import/export構文を持つ)かどうかを判定する
+ *
+ * 旧実装で使用していた esm パッケージは ESM / CommonJS のどちらの形式でも
+ * 読み込めた。Node標準の読み込みでは形式ごとに扱いが異なるため、
+ * 構文チェック用に取得済みのASTを使って形式を判定し、
+ * 既存プラグインの互換性(施設独自プラグインを含む)を維持する。
+ * @param program acornで解析したAST
+ * @returns ESM形式ならtrue
+ */
+const isEsmSource = (program: Program): boolean =>
+  program.body.some(
+    (node) =>
+      node.type === 'ImportDeclaration' ||
+      node.type === 'ExportNamedDeclaration' ||
+      node.type === 'ExportDefaultDeclaration' ||
+      node.type === 'ExportAllDeclaration'
+  );
+
+/**
+ * プラグインのJSファイルをESMモジュールとして読み込む
+ *
+ * CommonJS形式のプラグインは initJs() で登録を拒否するため、ここへは到達しない。
+ * （フロントエンドがdata URLの動的importで実行する都合上、
+ *   CommonJS形式のプラグインはそもそもブラウザで実行できない。詳細は initJs() のコメント）
+ * @param absolutePath 読み込むJSファイルの絶対パス
+ * @returns プラグインモジュール
+ */
+const loadPluginModule = async (
+  absolutePath: string
+): Promise<IPluginModule> =>
+  // Windowsのドライブレター付きパスをそのまま渡すと解決に失敗するためfile URLへ変換する
+  await importPluginModule(pathToFileURL(absolutePath).href);
+
+/**
  * プラグインのinitを実行し、得られた情報を返す
- * @param requireEsm
+ * @param loadModuleFunc プラグインJSを読み込む関数
  * @param filePath
  * @returns
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const initJs = async (requireEsm: any, filePath: string) => {
+const initJs = async (
+  loadModuleFunc: (absolutePath: string) => Promise<IPluginModule>,
+  filePath: string
+) => {
   const retValue: initValueInfo = { path: filePath };
 
   try {
@@ -460,10 +517,25 @@ const initJs = async (requireEsm: any, filePath: string) => {
       pathModule.join(process.cwd(), filePath),
       { encoding: 'utf8' }
     );
-    parse(scriptText, { ecmaVersion: 2022, sourceType: 'module' });
+    const program = parse(scriptText, {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+    });
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-    const loadModule: IPluginModule = await requireEsm(
+    // CommonJS形式(module.exports / exports.xxx)のプラグインは登録を拒否する。
+    // 理由: プラグインの本体処理(main/importDocument)はフロントエンドが
+    // data URLの動的import(packages/frontend/src/common/Plugin.ts)で実行するが、
+    // ブラウザの動的importはESMしか解釈できないため、CommonJS形式は必ず実行に失敗する。
+    // 「登録はできるが実行できない」状態を作らないよう、入口で弾く。
+    if (!isEsmSource(program)) {
+      throw {
+        name: 'moduleFormat',
+        message:
+          'CommonJS形式のプラグインは実行できません。ESM形式(export)で作成してください',
+      };
+    }
+
+    const loadModule: IPluginModule = await loadModuleFunc(
       pathModule.join(process.cwd(), filePath)
     );
 
@@ -625,11 +697,35 @@ const getInitValues = async (
     });
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-var-requires
-    const requireEsm = require('esm')(module);
+    // プラグインはESM形式(export async function init ...)で記述される。
+    // 展開先ディレクトリ配下の.jsをNodeがESMとして解釈できるよう、
+    // 展開先のルートに {"type":"module"} だけを持つpackage.jsonを配置する。
+    // これを置かないと packages/backend/package.json (CommonJS扱い) が適用され、
+    // export構文がSyntaxErrorになる。
+    // ファイル一覧(fileList)は呼び出し元で取得済みのため、ここでpackage.jsonを
+    // 追加しても「JSファイル以外のファイルが含まれています。」の既存チェックには影響しない。
+    // 展開先はUUID付きの使い捨てディレクトリであり、毎回異なるパスになる。
+    try {
+      fs.writeFileSync(
+        pathModule.join(process.cwd(), dirPath, 'package.json'),
+        JSON.stringify({ type: 'module' }),
+        { encoding: 'utf8' }
+      );
+    } catch (err) {
+      logging(
+        LOGTYPE.ERROR,
+        `プラグイン読み込み用の設定ファイルを作成できませんでした。(${
+          (err as Error).message
+        })`,
+        'Plugin',
+        'getInitValues'
+      );
+      throw new Error('プラグインの読み込み準備に失敗しました。');
+    }
+
     // jsファイルのinitから情報取得
     const initValList = await Promise.all(
-      jsFileNames.map(async (path) => await initJs(requireEsm, path))
+      jsFileNames.map(async (path) => await initJs(loadPluginModule, path))
     );
 
     for (const info of initValList) {

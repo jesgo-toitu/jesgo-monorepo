@@ -66,14 +66,14 @@ async function createReleasePackage() {
 
 ## システム要件
 - Windows 10/11 または Windows Server 2019/2022
-- Node.js 20.x 以上
-- PostgreSQL 14.x 以上
+- Node.js 24.x 以上
+- PostgreSQL 17.x
 
 ## インストール手順
 
 ### 1. 前提条件の確認
-- Node.js 20がインストールされていることを確認
-- PostgreSQL 14がインストールされ、サービスが起動していることを確認
+- Node.js 24がインストールされていることを確認
+- PostgreSQL 17がインストールされ、サービスが起動していることを確認
 
 ### 2. デプロイの実行
 PowerShellを管理者権限で開き、以下のコマンドを実行：

@@ -880,12 +880,49 @@ export const LoadPluginList = async (
     const plugins = pluginListReturnBody.filter((p) => p.plugin_id);
     const pluginGroups = pluginListReturnBody.filter((p) => !p.plugin_id);
 
+    // 読み込みに失敗したプラグイン名
+    const failedPluginNames: string[] = [];
+
     // eslint-disable-next-line no-restricted-syntax
     for (const item of plugins) {
       // DBから取れないものは直接initを叩いて取得
-      const plugin = await GetModule(item.script_text);
-      const initValue = await plugin.init();
-      item.newdata = initValue.newdata;
+      //
+      // 1本のプラグインの読み込み・init実行が失敗しても、残りのプラグインの
+      // 取得と後続処理を止めないこと。
+      // ここで例外を投げると、ログイン直後のプラグイン全ロード(views/Login.tsx)が
+      // 中断されて患者リストへ遷移できなくなり、全ユーザーがログイン不能になる。
+      try {
+        // アラートは1件ずつ出さず、ループ後にまとめて通知する
+        const plugin = await GetModule(item.script_text, true);
+        if (!plugin || typeof plugin.init !== 'function') {
+          throw new Error('プラグインを読み込めませんでした');
+        }
+        const initValue = await plugin.init();
+        item.newdata = initValue.newdata;
+      } catch (e) {
+        failedPluginNames.push(item.plugin_name);
+        console.error(
+          `プラグイン「${item.plugin_name}」の読み込みに失敗しました`,
+          e
+        );
+      }
+    }
+
+    // 読み込めなかったプラグインがあった場合は利用者に通知する(処理は継続する)
+    if (failedPluginNames.length > 0) {
+      // eslint-disable-next-line no-alert
+      alert(
+        [
+          '【警告】',
+          '次のプラグインは読み込めませんでした。',
+          '',
+          ...failedPluginNames,
+          '',
+          'これらのプラグインは実行できません。',
+          'プラグイン管理画面から削除するか、ESM形式(export)で作り直して登録し直してください。',
+          '他の機能は通常どおり使用できます。',
+        ].join('\n')
+      );
     }
 
     // プラグイングループ制御
