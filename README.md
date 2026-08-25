@@ -24,16 +24,34 @@ JESGOは医療情報を管理するWebアプリケーションです。このリ
 ## システム要件
 
 ### 開発環境
-- Node.js 20.x 以上
-- npm 10.x 以上
+- Node.js 24.x 以上
+- npm 11.x 以上
 - Docker & Docker Compose（開発時）
-- PostgreSQL 14.x（ローカル開発時）
+- PostgreSQL 17.x（ローカル開発時。検証済み: 17.11）
 - Git
 
 ### 本番環境（Windows）
 - Windows 10/11 または Windows Server 2019/2022
-- Node.js 20.x 以上
-- PostgreSQL 14.x 以上
+- Node.js 24.x 以上（本番環境でも必須）
+- PostgreSQL 17.x（検証済み: 17.11）
+
+### 検証済みバージョン
+
+本バージョン（v1.6.0）は次の組み合わせで動作を確認している。
+
+| 対象 | 検証済みバージョン | 実際に使用中の値を確認するコマンド |
+|------|-------------------|--------------------------------|
+| Node.js | **24.19.0** | `node -v` / `docker exec jesgo-backend-dev node -v` |
+| npm | **11.17.0** | `npm -v` |
+| PostgreSQL | **17.11** | `docker exec jesgo-postgres-dev postgres --version` |
+
+> リポジトリの宣言（`.nvmrc` = `24`、`engines` = `node >=24.0.0`、`postgres:17-alpine`）はいずれもメジャー指定である。
+> **使用中のマイナーバージョンは上記コマンドで確認できる。**
+
+### 動作確認手順
+
+Docker と Windows ローカルの 2 通りの動作確認手順は **[VERIFICATION.md](VERIFICATION.md)** にまとめている。
+**依存関係のインストール後は `npm run verify:install` を必ず実行すること**（パッチ適用と `bcrypt` の可用性を検証し、問題があれば異常終了する）。
 
 ## プロジェクト構成
 
@@ -95,7 +113,7 @@ npm run docker:dev
 ### ローカル開発（Dockerなし）
 
 ```bash
-# 1. PostgreSQL 14をインストール・起動
+# 1. PostgreSQL 17をインストール・起動
 
 # 2. 依存関係のインストール
 npm install
@@ -150,6 +168,9 @@ v1.5.0から、設定ファイルは`packages/settings/`ディレクトリで一
 
 ### 設定ファイルの構造
 
+テンプレートは **`packages/settings/config.template.json`** である。
+`cp packages/settings/config.template.json packages/settings/config.json` でコピーして使用する。
+
 `packages/settings/config.json`:
 ```json
 {
@@ -157,7 +178,7 @@ v1.5.0から、設定ファイルは`packages/settings/`ディレクトリで一
     "database": "jesgo_db",
     "user": "postgres",
     "password": "12345678",
-    "host": "postgres",
+    "host": "localhost",
     "port": 5432,
     "passwordSalt": "abcde",
     "hashSalt": "3^0g#H-x$M",
@@ -169,6 +190,13 @@ v1.5.0から、設定ファイルは`packages/settings/`ディレクトリで一
   }
 }
 ```
+
+> **`server.host` について（重要）**
+>
+> - **既定値は `localhost`** とする。**本番環境（Windows ネイティブ実行）では `localhost` でなければ接続できない。**
+> - **Docker（`npm run docker:dev`）で使う場合も、この値を変更する必要はない。** `docker-compose.dev.yml` が環境変数 `DB_HOST=postgres` を与え、
+>   **環境変数が設定ファイルより優先される**ため、同じ `config.json` のまま Docker と Windows ローカルの両方で動作する。
+> - 逆に `server.host` を `postgres`（Docker のサービス名）にすると、**Docker では動くが Windows ネイティブ実行では接続できなくなる。**
 
 ### 環境変数による上書き
 
@@ -546,12 +574,12 @@ chore: その他の変更
 #### 1. Node.js バージョンエラー
 
 ```bash
-# Node.js 20をインストール
-nvm install 20
-nvm use 20
+# Node.js 24をインストール
+nvm install 24
+nvm use 24
 
 # バージョン確認
-node --version  # v20.x.x
+node --version  # v24.x.x
 ```
 
 #### 2. 依存関係の問題

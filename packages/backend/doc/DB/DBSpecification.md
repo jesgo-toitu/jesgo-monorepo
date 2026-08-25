@@ -4,7 +4,7 @@
 
 ### 使用アプリケーション
 
-PostgreSQL 14.1(Windows)
+PostgreSQL 17(Windows)
 
 ### 文字コード
 

@@ -1,5 +1,5 @@
 # Backend Dockerfile
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 
 # Install system dependencies
 RUN apk add --no-cache \
@@ -9,17 +9,6 @@ RUN apk add --no-cache \
     postgresql-client \
     openssh \
     bash
-
-# Install dependencies only when needed
-FROM base AS deps
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-COPY packages/backend/package*.json ./packages/backend/
-
-# Install dependencies
-RUN npm install --only=production && npm cache clean --force
 
 # Development stage
 FROM base AS dev

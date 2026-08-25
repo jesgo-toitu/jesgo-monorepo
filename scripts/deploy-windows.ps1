@@ -1,5 +1,5 @@
-# JESGO Windows Deployment Script
-# Node.js 20 + PostgreSQL 14 環境向け
+﻿# JESGO Windows Deployment Script
+# Node.js 24 + PostgreSQL 17 環境向け
 
 param(
     [string]$Environment = "production",
@@ -24,14 +24,14 @@ try {
     $nodeVersion = node --version
     Write-Host "Node.js version: $nodeVersion" -ForegroundColor Green
     
-    # Node.js 20以上かチェック
+    # Node.js 24以上かチェック
     $versionNumber = [int]($nodeVersion -replace 'v(\d+)\..*', '$1')
-    if ($versionNumber -lt 20) {
-        throw "Node.js version 20 or higher is required. Current version: $nodeVersion"
+    if ($versionNumber -lt 24) {
+        throw "Node.js version 24 or higher is required. Current version: $nodeVersion"
     }
 } catch {
     Write-Host "Error: Node.js not found or version check failed" -ForegroundColor Red
-    Write-Host "Please install Node.js 20 or higher from https://nodejs.org/" -ForegroundColor Yellow
+    Write-Host "Please install Node.js 24 or higher from https://nodejs.org/" -ForegroundColor Yellow
     exit 1
 }
 
@@ -43,7 +43,7 @@ if (-not $SkipDatabase) {
         Write-Host "PostgreSQL version: $pgVersion" -ForegroundColor Green
     } catch {
         Write-Host "Warning: PostgreSQL not found in PATH" -ForegroundColor Yellow
-        Write-Host "Please ensure PostgreSQL 14 is installed and accessible" -ForegroundColor Yellow
+        Write-Host "Please ensure PostgreSQL 17 is installed and accessible" -ForegroundColor Yellow
     }
 }
 
@@ -173,12 +173,27 @@ Write-Host "`n9. Updating configuration files..." -ForegroundColor Cyan
 
 $configPath = "$backendDest\backendapp\config\config.json"
 if (Test-Path $configPath) {
-    $config = Get-Content $configPath | ConvertFrom-Json
-    $config.host = "localhost"
-    $config.port = 5432
-    $config.database = "jesgo_db"
-    $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
-    Write-Host "Backend configuration updated" -ForegroundColor Green
+    # 設定ファイルは { "server": { ... }, "webApp": { ... } } の入れ子構造であり、
+    # アプリケーションが実際に読むのは server 配下のキーである
+    # (packages/common/src/utils/config-loader.ts が configFile.server を参照している)。
+    # トップレベルに host / port / database を書いても読まれないうえ、
+    # PowerShell では存在しないプロパティへの代入が例外となり、
+    # $ErrorActionPreference = "Stop" のためデプロイがここで中断してしまう。
+    # したがって必ず server 配下を更新すること。
+    $config = Get-Content $configPath -Raw | ConvertFrom-Json
+    if ($null -eq $config.server) {
+        throw "Invalid config file: server section not found in $configPath"
+    }
+    $config.server.host = "localhost"
+    $config.server.port = 5432
+    $config.server.database = "jesgo_db"
+    # Node 側は JSON.parse で読み込むため、BOM を付けずに UTF-8 で書き出す
+    $configJson = $config | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($configPath, $configJson, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Backend configuration updated (server.host / server.port / server.database)" -ForegroundColor Green
+} else {
+    Write-Host "Warning: $configPath not found." -ForegroundColor Yellow
+    Write-Host "Copy packages/settings/config.template.json to the above path and set server.host for this environment." -ForegroundColor Yellow
 }
 
 # 起動スクリプト作成
