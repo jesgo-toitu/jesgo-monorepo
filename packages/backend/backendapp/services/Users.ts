@@ -86,15 +86,25 @@ export const hashPassword = async (password: string): Promise<string> => {
  * @param user ユーザー情報
  * @returns トークンとリフレッシュトークンを含むオブジェクト
  */
-export const generateTokens = (user: dispUser): {
+export const generateTokens = (user: jwtPayload): {
   token: string;
   reflesh_token: string;
 } => {
+  // JWTのペイロードは署名されるだけで暗号化されない。
+  // クライアントに保存されたトークンからbase64デコードのみで読み取れるため、
+  // password_hash等の認証情報は載せず、必要な項目だけを明示的に詰め直す。
+  const payload: jwtPayload = {
+    user_id: user.user_id,
+    name: user.name,
+    display_name: user.display_name,
+    roll_id: user.roll_id,
+    deleted: user.deleted,
+  };
   return {
-    token: sign(user, envVariables.privateKey, {
+    token: sign(payload, envVariables.privateKey, {
       expiresIn: '1h',
     }),
-    reflesh_token: sign(user, `${envVariables.privateKey}reflesh`, {
+    reflesh_token: sign(payload, `${envVariables.privateKey}reflesh`, {
       expiresIn: '3h',
     }),
   };
@@ -110,6 +120,18 @@ export interface dispUser {
   name: string;
   display_name: string;
   password_hash: string;
+  roll_id: number;
+  deleted: boolean;
+}
+
+/**
+ * JWTのペイロードに格納するユーザ情報。
+ * dispUserと異なりpassword_hashを持たない。
+ */
+export interface jwtPayload {
+  user_id: number;
+  name: string;
+  display_name: string;
   roll_id: number;
   deleted: boolean;
 }
@@ -526,7 +548,7 @@ export const editMyProfile = async (
 /**
  * JWTからユーザ情報を取得する
  * @param token
- * @returns ユーザ情報(dispUser)
+ * @returns ユーザ情報(jwtPayload)
  */
 export const decordJwt = (token: Jwt, isReflesh = false): ApiReturnObject => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'decordJwt');
@@ -535,7 +557,7 @@ export const decordJwt = (token: Jwt, isReflesh = false): ApiReturnObject => {
     if (isReflesh) {
       secret += 'reflesh';
     }
-    const decoded = verify(token.token, secret) as dispUser;
+    const decoded = verify(token.token, secret) as jwtPayload;
     return { statusNum: RESULT.NORMAL_TERMINATION, body: decoded };
   } catch (e) {
     if (e instanceof TokenExpiredError) {
@@ -567,7 +589,7 @@ export const getUsernameFromRequest = (req: any) => {
     const jwt: Jwt = { token: getToken(req) };
     const myApiReturnObject = decordJwt(jwt);
     if (myApiReturnObject.statusNum === RESULT.NORMAL_TERMINATION) {
-      return (myApiReturnObject.body as dispUser).display_name;
+      return (myApiReturnObject.body as jwtPayload).display_name;
     } else {
       // 戻り値がエラーの場合はログイン名なし
       return '';
@@ -584,7 +606,7 @@ export const getUserIdFromRequest = (req: any) => {
     const jwt: Jwt = { token: getToken(req) };
     const myApiReturnObject = decordJwt(jwt);
     if (myApiReturnObject.statusNum === RESULT.NORMAL_TERMINATION) {
-      return (myApiReturnObject.body as dispUser).user_id;
+      return (myApiReturnObject.body as jwtPayload).user_id;
     } else {
       // 戻り値がエラーの場合は-1を返す
       return -1;
@@ -624,7 +646,7 @@ export const checkAuth = async (
     }
 
     // トークンが正常にデコード出来た場合
-    const user: dispUser = myApiReturnObject.body as dispUser;
+    const user: jwtPayload = myApiReturnObject.body as jwtPayload;
     const dbAccess = new DbAccess();
     await dbAccess.connectWithConf();
 
@@ -762,16 +784,9 @@ export const refleshLogin = (oldToken: string | undefined): ApiReturnObject => {
     }
 
     // リフレッシュトークンが正常にデコード出来た場合、再度トークン、リフレッシュトークンを発行して返す
-    const oldUser: dispUser = myApiReturnObject.body as dispUser;
-    const newUser: dispUser = {
-      user_id: oldUser.user_id,
-      name: oldUser.name,
-      display_name: oldUser.display_name,
-      roll_id: oldUser.roll_id,
-      password_hash: oldUser.password_hash,
-      deleted: oldUser.deleted,
-    };
-    const token = generateTokens(newUser);
+    // generateTokens側でペイロードを組み直すため、ここでの詰め直しは不要
+    const oldUser: jwtPayload = myApiReturnObject.body as jwtPayload;
+    const token = generateTokens(oldUser);
     return { statusNum: RESULT.NORMAL_TERMINATION, body: token };
   } catch (err) {
     logging(LOGTYPE.ERROR, (err as Error).message, 'Users', 'refleshLogin');
