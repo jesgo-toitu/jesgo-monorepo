@@ -1,12 +1,12 @@
+/* 本文フォント BIZ UDPGothic の定義（詳細は assets/fonts/README.md）
+ * - local() は書かない。端末にインストール済みのフォントではなく、同梱した実体を必ず使う。
+ * - 参照はルート絶対にする。相対参照は /Patients/detail/1 のような深い階層で解決に失敗する。
+ * - 太字の面は定義しない（v1.5 と同じく合成太字になる）。Bold を足すと見た目が変わる。
+ * - ライセンス: SIL Open Font License 1.1（dist/fonts/OFL.txt として配布物に同梱）
+ */
 @font-face {
   font-family: 'BIZ-UDPGothic';
-  src: local('../assets/fonts/BIZUDPGothic-Regular.ttf'), local('BIZ UDPGothic');
-  /* font-weight: normal; */
+  src: url('/fonts/BIZUDPGothic-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
 }
-
-/* @font-face {
-    font-family: "BIZ-UDPGothic";
-    src: local("../assets/fonts/BIZUDPGothic-Bold.ttf"),
-    local("BIZ UDPGothic");
-    font-weight: 700;
-  } */
