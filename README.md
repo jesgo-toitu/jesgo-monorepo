@@ -80,11 +80,24 @@ jesgo-monorepo/
 │       ├── doc/DB/          # データベーススキーマ
 │       └── package.json
 │
-├── scripts/                  # デプロイスクリプト
+├── scripts/                  # 開発・保守用スクリプト（鍵生成、パッチ適用、検証）
 ├── docker/                   # Docker設定
 ├── docker-compose.dev.yml    # 開発環境
 └── package.json              # モノレポルート設定
 ```
+
+> **★ リリース資源作成の資材は本リポジトリに無い（Work Item #1160）。**
+> **本リポジトリの管理範囲はアプリケーション層までである。** 配布資源（`server` / `webApp`）を作る資材と
+> 手順書は **インストーラリポジトリ**（`086.Toitu-jesgo / jesgo-installer`。Azure DevOps）の **`v1.6/`** 配下にある。
+>
+> | 何 | どこ |
+> |----|------|
+> | 作成資材（`ExportProduction.bat` / `Export-Production.ps1` / `Export-Utils.ps1` / `select-dist-modules.js` / `runtime-modules.json` / `logConfig.json` / 鍵の置き場） | `jesgo-installer` の `v1.6/export/` |
+> | リリース資源作成手順書（旧・本リポジトリの `RELEASE.md`） | `jesgo-installer` の `v1.6/RELEASE.md` |
+> | 配布資源のみでの起動検証手順書（旧・本リポジトリの `DISTRIBUTION-VERIFICATION.md`） | `jesgo-installer` の `v1.6/DISTRIBUTION-VERIFICATION.md` |
+>
+> **`npm run export` は本リポジトリから無くなった。** 入口は `jesgo-installer` の
+> `v1.6\export\ExportProduction.bat` であり、**本リポジトリの場所を引数（または対話入力）で渡す。**
 
 ## クイックスタート
 
@@ -335,13 +348,30 @@ npm version patch  # patch, minor, major
 npm run build
 npm run test
 
-# リリースパッケージ作成
-npm run release:build
+# 配布資源（リリース資源）の作成
+# ★ 作成資材はインストーラリポジトリ（jesgo-installer）の v1.6\export\ にある（Work Item #1160）。
+#   手順は同リポジトリの v1.6\RELEASE.md を参照する。
+#     cd <jesgo-installer のルート>\v1.6\export
+#     .\ExportProduction.bat -RepoDir "<本リポジトリのルート>"
+#   ★ 事前に鍵を <jesgo-installer>\v1.6\export\resource\server\keys\ に置く必要がある
 
-# タグ作成
+# タグ作成（★ 省略しないこと。理由は下記）
 git tag v1.x.x
 git push origin v1.x.x
 ```
+
+> **★ タグ作成を省略しないこと（v1.6.0 / Sprint I で追記）。**
+> **本リポジトリには現時点で Git タグが 1 つも無い**（`git tag` の出力が空）。
+> そのため「v1.5 のコミット」をタグで指定できず、切り戻し手順ではコミットハッシュ（`4b861e7`）を直書きするしかない状態になっている。
+> **v1.6.0 以降はリリースごとに必ずタグを打つこと。**
+>
+> **★ 配布資源そのものも保管すること。** タグがあっても、後からソースを再ビルドして
+> **施設へ配ったものと同一の配布資源が再現される保証はない**（依存解決の結果を含むため）。
+> 切り戻しに使えるのは **リリース時に生成した `server` / `webApp` 一式そのもの**である。
+> 保管すべきものと、やむを得ずソースから作り直す場合の制約は **インストーラリポジトリの `v1.6/RELEASE.md`「8-3」** にまとめてある。
+
+配布資源の作り方・前提・鍵の取り扱い・切り戻しは **インストーラリポジトリの `v1.6/RELEASE.md`** に、
+作った配布資源の検証手順は **同リポジトリの `v1.6/DISTRIBUTION-VERIFICATION.md`** にまとめてある（Work Item #1160 で本リポジトリから移管）。
 
 ## Docker環境
 
@@ -505,37 +535,57 @@ npm run test
 
 ## 本番デプロイ（Windows環境）
 
-### 1. リリースパッケージの作成
+> **★ 稼働施設は完全な閉域である。** JESGO のサーバも利用者のブラウザもインターネットに到達できない。
+> したがって **導入時に外部からモジュールを取得する運用は成立しない**。配布資源は「置けば動く」完結した状態で渡す。
+> **施設側で `npm ci` / `npm install` を実行する手順は使わないこと。**
 
-```bash
-# ビルドとパッケージング
-npm run release:build
+配布の流れは次の 3 段である。
+
+```
+① 開発側で配布資源を作る          jesgo-installer の v1.6\export\ExportProduction.bat
+                                  → jesgo-installer の v1.6\RELEASE.md
+② 作った配布資源だけで検証する    外部遮断下で実操作
+                                  → jesgo-installer の v1.6\DISTRIBUTION-VERIFICATION.md
+③ インストーラで施設へ配る        innosetup 製（jesgo-installer / 別 Issue で改修）
 ```
 
-### 2. Windows環境でのデプロイ
+### 1. 配布資源（リリース資源）の作成
 
-PowerShellを管理者権限で実行：
+**★ 作成資材は本リポジトリに無い。** インストーラリポジトリ（`jesgo-installer`）の `v1.6/export/` にある（Work Item #1160）。
 
 ```powershell
-# デプロイスクリプトの実行
-.\scripts\deploy-windows.ps1 -Environment production -InstallServices
-
-# カスタムパスでのデプロイ
-.\scripts\deploy-windows.ps1 -DeployPath "D:\MyApp\jesgo" -InstallServices
+# インストーラリポジトリ側で実行する（配布資源を作る入口はこれだけ）
+cd <jesgo-installer のルート>\v1.6\export
+.\ExportProduction.bat -RepoDir "<本リポジトリのルート>"
 ```
 
-### 3. 手動セットアップ（必要に応じて）
+- **本リポジトリ（モノレポ）の場所を引数で渡す。** 省略すると対話で聞かれる。
+- 続けて出力先ディレクトリを対話で 1 回聞かれる。**両リポジトリの外の絶対パス**を指定する。
+- 出力されるのは **`server`（バックエンド）と `webApp`（フロントエンド）の 2 ディレクトリ**だけで、
+  **実行に必要なモジュールが同梱される**（施設側での取得は不要）。
+- **★ 実行前に鍵を `<jesgo-installer>\v1.6\export\resource\server\keys\` へ手で置く必要がある。**
+  置かないと backend の出力途中で処理が止まる。
+- **手順・前提・鍵の取り扱い・切り戻しはインストーラリポジトリの `v1.6/RELEASE.md` を参照する（本節は要約）。**
 
-```powershell
-# データベースのみスキップ
-.\scripts\deploy-windows.ps1 -SkipDatabase
+> **v1.6.0 で本リポジトリから無くなった手順:**
+> `npm run export`（`export\`）は **廃止ではなくインストーラリポジトリへの移管**である（Work Item #1160。
+> モノレポの管理範囲をアプリケーション層までとしたため）。**入口は上記に読み替えること。**
+> `npm run release:build` / `npm run release:package` / `npm run deploy:windows`
+> （`scripts\package-release.js`・`scripts\deploy-windows.ps1`）と `packages\*\export\export.ps1` は **削除した。**
+> 前者は **導入先で `npm ci` を実行する前提で閉域では成立せず**、後者は **モノレポ化後の依存構成に追随していなかった**ためである。
+> 詳細はインストーラリポジトリの `v1.6/RELEASE.md`「1-1」および `/docs/progress.md`（Sprint E / Sprint H / #1160）。
 
-# ビルドのみスキップ
-.\scripts\deploy-windows.ps1 -SkipBuild
+### 2. 配布資源の検証
 
-# サービスインストールなし
-.\scripts\deploy-windows.ps1
-```
+**外部ネットワークを遮断した状態**で、配布資源だけを置いた環境で実操作を行う。
+手順は **インストーラリポジトリの `v1.6/DISTRIBUTION-VERIFICATION.md`** にまとめてある。
+**起動できたことだけで合格としない**（プラグイン実行・出力生成・アップロードなど、特定操作で初めて読み込まれる処理を必ず含める）。
+
+### 3. 施設への配布（インストーラ）
+
+施設への配置・サービス登録・設定ファイルの生成は **innosetup 製のインストーラ**が行う。
+インストーラ資材は **インストーラリポジトリ（`jesgo-installer`）** にあり、**v1.6 では「既存インストーラの改修」を別 Issue で実施する**（本リポジトリに資材は含まれない）。
+インストーラは本手順で作った `server` / `webApp` をそのまま取り込み、配置後に `npm run install-service`（= `winser -i`）でサービス登録する。
 
 ## コーディング規約
 
@@ -735,6 +785,10 @@ SELECT * FROM jesgo_user LIMIT 10;
 - ファイアウォールの適切な設定
 - 定期的なセキュリティアップデート
 
+> **★ 稼働施設での現状（実態の記録）:** 上記は本来あるべき運用であるが、**稼働中の施設では JWT 署名鍵・`passwordSalt`・DB 接続情報が全施設共通の固定値**で運用されている
+> （インストーラが施設ごとに固有生成しているのは `hashSalt` のみ）。配布経路・管理方法・変更時の影響は **インストーラリポジトリの `v1.6/RELEASE.md`「6. 鍵・ソルト・DB 接続情報の配布経路と管理方法」** にまとめてある。
+> **稼働施設の鍵を独断で差し替えないこと**（発行済みトークンがすべて無効になる）。改善は Work Item #1157 のスコープ外であり、インストーラ改修 Issue への申し送り事項として整理してある。
+
 ### 設定ファイルの管理
 
 - ✅ `config.template.json`: Gitにコミット（デフォルト値のみ）
@@ -771,8 +825,13 @@ npm run docker:down      # Docker環境停止
 npm run docker:logs      # Dockerログ確認
 npm run generate:keys    # RSA鍵生成（macOS/Linux）
 npm run generate:keys:windows # RSA鍵生成（Windows）
-npm run release:build    # リリースパッケージ作成
+npm run apply:patches    # patch-package によるパッチ適用
+npm run verify:install   # パッチ適用と bcrypt の検証（省略しないこと）
 ```
+
+> **`npm run export` は無い（Work Item #1160 で移管）。** 配布資源（リリース資源）の作成は
+> インストーラリポジトリ（`jesgo-installer`）の `v1.6\export\ExportProduction.bat` で行う。
+> 手順は同リポジトリの `v1.6/RELEASE.md`。
 
 ### パッケージ個別
 
@@ -843,10 +902,20 @@ git push origin :refs/tags/v1.5.0
 
 ### プロジェクト内ドキュメント
 
+- [VERIFICATION.md](VERIFICATION.md) - 動作確認手順（Docker / Windows ローカル）
 - [packages/common/README.md](packages/common/README.md) - 共通パッケージの詳細
 - [packages/backend/README.md](packages/backend/README.md) - バックエンド仕様
 - [packages/frontend/README.md](packages/frontend/README.md) - フロントエンド仕様
 - [packages/settings/README.md](packages/settings/README.md) - 設定ファイルガイド
+
+### 別リポジトリのドキュメント（Work Item #1160 で移管）
+
+リリース資源（配布資源）に関する資材と手順書は **インストーラリポジトリ**
+（`086.Toitu-jesgo / jesgo-installer`。Azure DevOps）の `v1.6/` 配下にある。
+
+- `v1.6/RELEASE.md` - **配布資源（リリース資源）の作成手順・鍵の取り扱い・切り戻し**
+- `v1.6/DISTRIBUTION-VERIFICATION.md` - **配布資源のみでの起動検証手順（閉域前提）**
+- `v1.6/export/` - 作成資材（`ExportProduction.bat` / `Export-Production.ps1` / `Export-Utils.ps1` / `select-dist-modules.js` / `runtime-modules.json` / `logConfig.json` / 鍵の置き場）
 
 ### 技術スタック
 

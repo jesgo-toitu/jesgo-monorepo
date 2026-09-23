@@ -151,6 +151,9 @@ release/
 # RSA Keys (keep keys out of version control)
 packages/backend/backendapp/config/keys/private.key
 packages/backend/backendapp/config/keys/public.key
+# 配布資源へ同梱する鍵の置き場所（旧 export/resource/server/keys/）は
+# Work Item #1160 でインストーラリポジトリ（jesgo-installer）の
+# v1.6/export/resource/server/keys/ へ移管した。除外設定も同リポジトリ側にある。
 
 # Log files
 packages/backend/log/
