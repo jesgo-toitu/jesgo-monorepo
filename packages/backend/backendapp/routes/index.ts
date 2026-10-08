@@ -20,6 +20,8 @@ import {
   getUserRollList,
   saveUserRoll,
   JesgoUserRoll,
+  getUserSetting,
+  updateUserSetting,
 } from '../services/Users';
 import {
   deletePatient,
@@ -81,6 +83,37 @@ app.use(cors());
 
 const router = Router();
 const upload = multer({ dest: 'uploads/' });
+
+/**
+ * リクエストボディから保存確認の表示設定(hide_save_confirm)を取り出す
+ * @param body リクエストボディ
+ * @returns 真偽値: 指定あり ／ undefined: 指定なし ／ null: 真偽値以外が指定された(不正)
+ */
+const parseHideSaveConfirm = (body: unknown): boolean | undefined | null => {
+  if (body === null || typeof body !== 'object') {
+    return undefined;
+  }
+  const value = (body as { hide_save_confirm?: unknown }).hide_save_confirm;
+  if (value === undefined) {
+    return undefined;
+  }
+  return typeof value === 'boolean' ? value : null;
+};
+
+/**
+ * リクエストからトークンを取り出す。トークンが付いていない場合は undefined を返す
+ * (getToken はトークンが無いリクエストで例外になるため、未ログインを権限エラーとして返すために使う)
+ * @param req リクエスト
+ * @returns トークン。無い場合は undefined
+ */
+const getTokenOrUndefined = (req: express.Request): string | undefined => {
+  try {
+    const token: unknown = getToken(req);
+    return typeof token === 'string' && token !== '' ? token : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 // routerにルーティングの動作を記述する
 
@@ -260,8 +293,22 @@ router.post('/signup/', async (req, res, next) => {
       res.status(400).send({ statusNum: RESULT.FAILED_USER_ERROR, body: '必須パラメータが不足しています' });
       return;
     }
-    
-    signUpUser(body.name, body.display_name, body.password, body.roll_id)
+
+    // 保存確認の表示設定(任意)。指定する場合は真偽値のみ受け付ける。未指定なら既定値(表示する)
+    const hideSaveConfirm = parseHideSaveConfirm(body);
+    if (hideSaveConfirm === null) {
+      logging(LOGTYPE.ERROR, '保存確認の表示設定の値が不正です', 'router', '/signup');
+      res.status(400).send({ statusNum: RESULT.FAILED_USER_ERROR, body: '保存確認の表示設定の値が不正です' });
+      return;
+    }
+
+    signUpUser(
+      body.name,
+      body.display_name,
+      body.password,
+      body.roll_id,
+      hideSaveConfirm
+    )
       .then((result) => res.status(200).send(result))
       .catch(next);
   }
@@ -377,17 +424,109 @@ router.post('/editUser/', async (req, res, next) => {
       res.status(400).send({ statusNum: RESULT.FAILED_USER_ERROR, body: '必須パラメータが不足しています' });
       return;
     }
-    
+
+    // 保存確認の表示設定(任意)。指定する場合は真偽値のみ受け付ける。未指定なら変更しない
+    const hideSaveConfirm = parseHideSaveConfirm(body);
+    if (hideSaveConfirm === null) {
+      logging(LOGTYPE.ERROR, '保存確認の表示設定の値が不正です', 'router', '/editUser');
+      res.status(400).send({ statusNum: RESULT.FAILED_USER_ERROR, body: '保存確認の表示設定の値が不正です' });
+      return;
+    }
+
     editUserProfile(
       body.user_id,
       body.name,
       body.display_name,
       body.password,
-      body.roll_id
+      body.roll_id,
+      hideSaveConfirm
     )
       .then((result) => res.status(200).send(result))
       .catch(next);
   }
+});
+
+/**
+ * 利用者ごとの設定取得(本人の設定のみ)
+ * 対象の利用者はJWTから決める。リクエストで利用者IDを指定することはできない
+ */
+router.get('/getUserSetting', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/getUserSetting',
+    getUsernameFromRequest(req)
+  );
+
+  // 権限の確認(ログイン中の利用者であること)
+  const authResult: ApiReturnObject = await checkAuth(getTokenOrUndefined(req), [
+    roll.login,
+    roll.view,
+  ]);
+  if (
+    authResult.statusNum !== RESULT.NORMAL_TERMINATION ||
+    authResult.userId === undefined
+  ) {
+    res.status(200).send(authResult);
+    return;
+  }
+
+  getUserSetting(authResult.userId)
+    .then((result) => res.status(200).send(result))
+    .catch(next);
+});
+
+/**
+ * 利用者ごとの設定更新(本人の設定のみ)
+ * 対象の利用者はJWTから決める。リクエストで利用者IDを指定しても無視する
+ */
+router.post('/updateUserSetting/', async (req, res, next) => {
+  logging(
+    LOGTYPE.DEBUG,
+    '呼び出し',
+    'router',
+    '/updateUserSetting',
+    getUsernameFromRequest(req)
+  );
+
+  // 権限の確認(ログイン中の利用者であること)
+  const authResult: ApiReturnObject = await checkAuth(getTokenOrUndefined(req), [
+    roll.login,
+    roll.view,
+  ]);
+  if (
+    authResult.statusNum !== RESULT.NORMAL_TERMINATION ||
+    authResult.userId === undefined
+  ) {
+    res.status(200).send(authResult);
+    return;
+  }
+
+  const requestBody = req.body as { data?: unknown } | undefined;
+  // フロントエンドからのリクエスト構造に対応
+  const body: unknown = requestBody?.data || requestBody;
+
+  // パラメータの確認(真偽値のみ受け付ける)
+  const hideSaveConfirm = parseHideSaveConfirm(body);
+  if (hideSaveConfirm === undefined || hideSaveConfirm === null) {
+    logging(
+      LOGTYPE.ERROR,
+      '保存確認の表示設定の値が不正です',
+      'router',
+      '/updateUserSetting',
+      getUsernameFromRequest(req)
+    );
+    res.status(400).send({
+      statusNum: RESULT.FAILED_USER_ERROR,
+      body: '保存確認の表示設定の値が不正です',
+    });
+    return;
+  }
+
+  updateUserSetting(authResult.userId, { hide_save_confirm: hideSaveConfirm })
+    .then((result) => res.status(200).send(result))
+    .catch(next);
 });
 
 /**
