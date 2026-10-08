@@ -116,6 +116,18 @@ const CustomDivForm = (props: CustomDivFormProp) => {
   const previousFormDataRef = useRef<any>({});
   // 元のスキーマ（customSchemaAppendFormDataProperty実行前）を保持するためのref
   const orgSchemaRef = useRef<JSONSchema7 | null>(null);
+  // 最初の変更が行われる前のformDataを保持するためのref（再表示後の最初の変更での条件変更検出用）
+  const displayedFormDataRef = useRef<Record<string, unknown>>({});
+  // displayedFormDataRefの複製元（formDataが差し替わったときだけ複製し直す）
+  const displayedFormDataSourceRef = useRef<unknown>(undefined);
+  if (
+    Object.keys(previousFormDataRef.current).length === 0 &&
+    displayedFormDataSourceRef.current !== formData
+  ) {
+    displayedFormDataSourceRef.current = formData;
+    displayedFormDataRef.current =
+      (lodash.cloneDeep(formData) as Record<string, unknown>) ?? {};
+  }
 
   // eventdate不整合の場合、現在日時点で有効な最新スキーマを適応する
   let orgSchemaForClear: JSONSchema7 | null = null;
@@ -455,64 +467,6 @@ const CustomDivForm = (props: CustomDivFormProp) => {
   };
   
   /**
-   * visibleWhenで非表示になった項目の値をクリアする
-   * @param argFormData フォームデータ
-   * @param schema スキーマ
-   */
-  const clearVisibleWhenProperties = (
-    argFormData: any,
-    schema: JSONSchema7 | undefined
-  ) => {
-    if (!schema || !argFormData || typeof argFormData !== 'object' || Array.isArray(argFormData)) {
-      return;
-    }
-    
-    const properties = schema.properties || {};
-    
-    Object.keys(properties).forEach((key) => {
-      const propSchema = properties[key] as JSONSchema7;
-      const visibleWhenSchema = propSchema[Const.EX_VOCABULARY.UI_VISIBLE_WHEN] as JSONSchema7;
-      
-      if (visibleWhenSchema) {
-        // visibleWhenの条件を評価
-        const conditionMet = checkVisibleWhenCondition(visibleWhenSchema, argFormData);
-        
-        if (!conditionMet && argFormData[key] !== undefined) {
-          // 条件を満たさない場合は値をクリア
-          delete argFormData[key];
-        } else if (conditionMet && argFormData[key] && typeof argFormData[key] === 'object' && !Array.isArray(argFormData[key])) {
-          // 条件を満たす場合でも、ネストされたオブジェクトの場合は再帰的に処理
-          const nestedPropSchema = propSchema;
-          clearVisibleWhenProperties(argFormData[key], nestedPropSchema);
-        } else if (conditionMet && Array.isArray(argFormData[key])) {
-          // 配列の場合は各要素に対して再帰的に処理
-          const itemsSchema = propSchema.items as JSONSchema7;
-          if (itemsSchema) {
-            (argFormData[key] as any[]).forEach((item: any) => {
-              if (item && typeof item === 'object' && !Array.isArray(item)) {
-                clearVisibleWhenProperties(item, itemsSchema);
-              }
-            });
-          }
-        }
-      } else if (argFormData[key] && typeof argFormData[key] === 'object' && !Array.isArray(argFormData[key])) {
-        // visibleWhenがない場合でも、ネストされたオブジェクトの場合は再帰的に処理
-        clearVisibleWhenProperties(argFormData[key], propSchema);
-      } else if (Array.isArray(argFormData[key])) {
-        // 配列の場合は各要素に対して再帰的に処理
-        const itemsSchema = propSchema.items as JSONSchema7;
-        if (itemsSchema) {
-          (argFormData[key] as any[]).forEach((item: any) => {
-            if (item && typeof item === 'object' && !Array.isArray(item)) {
-              clearVisibleWhenProperties(item, itemsSchema);
-            }
-          });
-        }
-      }
-    });
-  };
-  
-  /**
    * ネストされたオブジェクト内のプロパティを再帰的にクリアする
    * @param argFormData フォームデータ
    * @param previousSchema 前回のスキーマ（CustomSchemaWithoutAppendで処理済み）
@@ -638,8 +592,6 @@ const CustomDivForm = (props: CustomDivFormProp) => {
                   orgItemsSchema,
                   rootOrgSchema
                 );
-                // visibleWhenで非表示になった項目の値をクリア
-                clearVisibleWhenProperties(item, currentItemsSchema);
               }
             });
           }
@@ -652,8 +604,6 @@ const CustomDivForm = (props: CustomDivFormProp) => {
             orgPropSchema,
             rootOrgSchema
           );
-          // visibleWhenで非表示になった項目の値をクリア
-          clearVisibleWhenProperties(argFormData[key], currentPropSchema);
         }
       }
       
@@ -747,8 +697,6 @@ const CustomDivForm = (props: CustomDivFormProp) => {
                     orgItemsSchema,
                     orgSchema
                   );
-                  // visibleWhenで非表示になった項目の値をクリア
-                  clearVisibleWhenProperties(item, currentItemsSchema);
                 }
               });
             }
@@ -761,8 +709,6 @@ const CustomDivForm = (props: CustomDivFormProp) => {
               orgPropSchema,
               orgSchema
             );
-            // visibleWhenで非表示になった項目の値をクリア
-            clearVisibleWhenProperties(argFormData[key], currentPropSchema);
           }
         }
         return;
@@ -943,15 +889,19 @@ const CustomDivForm = (props: CustomDivFormProp) => {
       
       if (!currentConditionMet) {
         // 現在条件が満たされていない場合、このallOf項目のプロパティを削除対象に追加
-        // 条件が変わった場合、同じプロパティ名でも値はクリアする
+        // （現在のスキーマでも表示され続ける項目を除く）
         previousKeys.forEach((key) => {
           // base schemaのプロパティは削除しない
           if (basePropertyKeys.has(key)) {
             return;
           }
           
-          // 他のallOf項目で同じプロパティが追加されている場合でも、条件が変わった場合は削除する
-          // 同じプロパティ名でも、異なる条件で追加された場合は値が異なる可能性があるため
+          // 他のallOf項目で同じプロパティが追加され、現在のスキーマでも表示され続ける(定義がある)場合は値を保持する
+          const currentPropSchema = currentSchema?.properties?.[key] as JSONSchema7 | undefined;
+          if (currentPropSchema && Object.keys(currentPropSchema).length > 0) {
+            return;
+          }
+
           keysToRemove.add(key);
         });
       } else {
@@ -1006,8 +956,6 @@ const CustomDivForm = (props: CustomDivFormProp) => {
                       orgItemsSchema,
                       orgSchema
                     );
-                    // visibleWhenで非表示になった項目の値をクリア
-                    clearVisibleWhenProperties(item, currentItemsSchema);
                   }
                 });
               }
@@ -1020,8 +968,6 @@ const CustomDivForm = (props: CustomDivFormProp) => {
                 orgPropSchema,
                 orgSchema
               );
-              // visibleWhenで非表示になった項目の値をクリア
-              clearVisibleWhenProperties(argFormData[key], currentPropSchema);
             }
           }
         });
@@ -1034,11 +980,208 @@ const CustomDivForm = (props: CustomDivFormProp) => {
         delete argFormData[propName];
       }
     });
-    
-    // visibleWhenで非表示になった項目の値をクリア（全体のスキーマに対して）
-    if (currentSchema) {
-      clearVisibleWhenProperties(argFormData, currentSchema);
+  };
+
+  /**
+   * オブジェクトまたは配列から指定したキーの値を取得する（それ以外はundefined）
+   * @param value オブジェクトまたは配列
+   * @param key プロパティ名または配列のインデックス
+   * @returns
+   */
+  const getChildValue = (value: unknown, key: string | number): unknown =>
+    value !== null && typeof value === 'object'
+      ? (value as Record<string | number, unknown>)[key]
+      : undefined;
+
+  /**
+   * 比較用の値に変換する（未入力(undefined、null、空文字)は同じ値として扱う）
+   * @param value 値
+   * @returns
+   */
+  const toComparable = (value: unknown): unknown =>
+    value === null || value === '' ? undefined : value;
+
+  /**
+   * visibleWhenの条件に使われる項目（親項目）のプロパティ名を取得する
+   * @param propSchema visibleWhenを持つ項目のスキーマ
+   * @returns
+   */
+  const getVisibleWhenParentNames = (propSchema: JSONSchema7 | undefined): string[] => {
+    const visibleWhenSchema = propSchema?.[Const.EX_VOCABULARY.UI_VISIBLE_WHEN] as
+      | JSONSchema7
+      | undefined;
+    if (!visibleWhenSchema) {
+      return [];
     }
+    // JSON Pointer形式（例: "#/治療情報"）からプロパティ名を取得
+    return getPropItemsAndNames(visibleWhenSchema).pNames.map((propPath) =>
+      propPath.replace(/^#?\//, '')
+    );
+  };
+
+  /**
+   * 親項目（if~then~else、visibleWhenの条件に使われる項目）の値が変更されたかをチェックする
+   * 未入力の状態からスキーマのdefault値が設定されただけの場合は変更なしとする
+   * @param parentNames 親項目のプロパティ名
+   * @param properties 親項目が属するスキーマのproperties
+   * @param argFormData フォームデータ
+   * @param previousFormData 前回のフォームデータ
+   * @returns 値が変更された親項目がある場合はtrue
+   */
+  const isParentItemChanged = (
+    parentNames: string[],
+    properties: { [key: string]: JSONSchema7Definition },
+    argFormData: Record<string, unknown>,
+    previousFormData: unknown
+  ): boolean =>
+    parentNames.some((name) => {
+      const currentValue = toComparable(argFormData[name]);
+      const previousValue = toComparable(getChildValue(previousFormData, name));
+      if (lodash.isEqual(previousValue, currentValue)) {
+        return false;
+      }
+      const defaultValue = (properties[name] as JSONSchema7 | undefined)?.default;
+      return !(
+        previousValue === undefined &&
+        defaultValue !== undefined &&
+        lodash.isEqual(currentValue, defaultValue)
+      );
+    });
+
+  /**
+   * 値が変更された親項目について、現在表示されていない子項目の値をクリアする
+   * - if~then~else: then/elseの項目のうち、現在のスキーマに定義がないもの
+   * - visibleWhen(配列の行): 値のある親項目を別の値に変更(未入力に戻す場合を含む)した行の、親項目以外の全項目
+   *   （未入力の親項目に初めて値を設定した場合はクリアしない）
+   * - visibleWhen(上記以外。行の追加・削除・並べ替えで位置が変わった行を含む): 条件を満たしていないもの
+   * 親項目の値が変更されていない子項目の値は変更しない
+   * @param argFormData フォームデータ
+   * @param previousFormData 前回のフォームデータ（再表示後の最初の変更では、変更前に表示していたフォームデータ）
+   * @param schema 現在のスキーマ（CustomSchemaWithoutAppendで処理済み）
+   * @param baseProperties 元のスキーマのproperties（base schema判定用。ルートのみ指定）
+   * @param isEditedRow true:配列の行のうち、今回の変更で値が変更された唯一の行（行の追加・削除・並べ替えではない）
+   */
+  const clearChildrenOfChangedParents = (
+    argData: unknown,
+    previousFormData: unknown,
+    schema: JSONSchema7 | undefined,
+    baseProperties?: { [key: string]: JSONSchema7Definition },
+    isEditedRow = false
+  ) => {
+    if (!schema || !argData || typeof argData !== 'object' || Array.isArray(argData)) {
+      return;
+    }
+
+    const argFormData = argData as Record<string, unknown>;
+    const properties = schema.properties || {};
+
+    // visibleWhenの行: 値のある親項目が別の値に変更された場合、同じ行の親項目以外の全項目をクリアする
+    if (isEditedRow) {
+      const rowParentNames = lodash.uniq(
+        Object.keys(properties).flatMap((key) =>
+          getVisibleWhenParentNames(properties[key] as JSONSchema7)
+        )
+      );
+      const isRowParentChanged = rowParentNames.some((name) => {
+        const previousValue = toComparable(getChildValue(previousFormData, name));
+        return (
+          previousValue !== undefined &&
+          !lodash.isEqual(previousValue, toComparable(argFormData[name]))
+        );
+      });
+      if (isRowParentChanged) {
+        Object.keys(properties).forEach((key) => {
+          if (!rowParentNames.includes(key)) {
+            delete argFormData[key];
+          }
+        });
+        return;
+      }
+    }
+
+    // if~then~else（直下のif、allOf内のif）
+    const conditionItems = [schema, ...((schema.allOf as JSONSchema7[]) ?? [])].filter(
+      (item) => item && item.if
+    );
+    conditionItems.forEach((item) => {
+      const parentNames = getPropItemsAndNames(item.if as JSONSchema7).pNames;
+      if (!isParentItemChanged(parentNames, properties, argFormData, previousFormData)) {
+        return;
+      }
+
+      [item.then, item.else].forEach((branch) => {
+        if (!branch || typeof branch !== 'object') {
+          return;
+        }
+        getPropItemsAndNames(branch).pNames.forEach((key) => {
+          const propSchema = properties[key] as JSONSchema7 | undefined;
+          // 現在のスキーマに定義がある（表示されている）項目、親項目自身はクリアしない
+          if (
+            (propSchema && Object.keys(propSchema).length > 0) ||
+            parentNames.includes(key) ||
+            argFormData[key] === undefined
+          ) {
+            return;
+          }
+
+          const isBaseProperty = baseProperties
+            ? baseProperties[key] !== undefined
+            : propSchema !== undefined;
+          if (isBaseProperty && lodash.isPlainObject(argFormData[key])) {
+            // base schemaに宣言されているオブジェクトは中身のみクリア
+            argFormData[key] = {};
+          } else {
+            delete argFormData[key];
+          }
+        });
+      });
+    });
+
+    Object.keys(properties).forEach((key) => {
+      const propSchema = properties[key] as JSONSchema7;
+      if (!propSchema || argFormData[key] === undefined) {
+        return;
+      }
+
+      // visibleWhen（値が変更された唯一の行は上で処理済みのため対象外）
+      const visibleWhenSchema = propSchema[Const.EX_VOCABULARY.UI_VISIBLE_WHEN] as JSONSchema7;
+      if (visibleWhenSchema && !isEditedRow) {
+        const parentNames = getVisibleWhenParentNames(propSchema);
+        if (
+          isParentItemChanged(parentNames, properties, argFormData, previousFormData) &&
+          !checkVisibleWhenCondition(visibleWhenSchema, argFormData)
+        ) {
+          delete argFormData[key];
+          return;
+        }
+      }
+
+      // ネストされたオブジェクト、配列の各要素は再帰的に処理
+      const currentValue = argFormData[key];
+      const previousValue = getChildValue(previousFormData, key);
+      if (Array.isArray(currentValue)) {
+        const itemsSchema = propSchema.items as JSONSchema7;
+        // 行数が変わらず、値が変更された行が1行だけの場合のみ、その行を「値が変更された行」として扱う
+        // （行の追加・削除・並べ替えでは、位置が変わっただけの行をクリアしない）
+        const changedIndexes =
+          Array.isArray(previousValue) && previousValue.length === currentValue.length
+            ? currentValue.flatMap((item: unknown, index: number) =>
+                lodash.isEqual(item, previousValue[index]) ? [] : [index]
+              )
+            : [];
+        currentValue.forEach((item: unknown, index: number) => {
+          clearChildrenOfChangedParents(
+            item,
+            getChildValue(previousValue, index),
+            itemsSchema,
+            undefined,
+            changedIndexes.length === 1 && changedIndexes[0] === index
+          );
+        });
+      } else if (typeof currentValue === 'object') {
+        clearChildrenOfChangedParents(currentValue, previousValue, propSchema);
+      }
+    });
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1048,6 +1191,9 @@ const CustomDivForm = (props: CustomDivFormProp) => {
     if (data === undefined || data === null) {
       data = {};
     }
+
+    // eventdate変更によるformData再生成の有無
+    let isVersionedFormData = false;
 
     if (thisDocument) {
       const currentEventDate = getEventDate(thisDocument, data);
@@ -1078,6 +1224,7 @@ const CustomDivForm = (props: CustomDivFormProp) => {
           }
 
           data = newFormdata;
+          isVersionedFormData = true;
         }
       }
     }
@@ -1138,6 +1285,36 @@ const CustomDivForm = (props: CustomDivFormProp) => {
     // 初回はスキーマの変更がないためスキップ
     if (!isFirstOnChange && orgSchemaRef.current && Object.keys(previousFormDataRef.current).length > 0) {
       clearHiddenProperties(data, orgSchemaRef.current, previousFormDataRef.current);
+    }
+
+    // 値が変更された親項目について、現在表示されていない子項目の値をクリアする
+    // 再表示後の最初の変更は前回のformDataがないため、変更前に表示していたformDataと比較する
+    // eventdate変更でformDataを再生成した場合は対象外
+    const comparisonFormData =
+      Object.keys(previousFormDataRef.current).length > 0
+        ? previousFormDataRef.current
+        : displayedFormDataRef.current;
+    if (
+      !isVersionedFormData &&
+      orgSchemaRef.current &&
+      Object.keys(comparisonFormData).length > 0
+    ) {
+      const currentSchema = CustomSchemaWithoutAppend({
+        orgSchema: orgSchemaRef.current,
+        formData: data,
+      });
+      // 入力フォームが保持しているformDataを直接書き換えると、表示中の項目の値をクリアしても
+      // 入力欄が再描画されないため、複製に対してクリアし、変更があった場合のみ差し替える
+      const clearedData = lodash.cloneDeep(data) as Record<string, unknown>;
+      clearChildrenOfChangedParents(
+        clearedData,
+        comparisonFormData,
+        currentSchema,
+        orgSchemaRef.current.properties
+      );
+      if (!lodash.isEqual(clearedData, data)) {
+        data = clearedData;
+      }
     }
     
     // 前回のformDataを更新（次回の比較用）
