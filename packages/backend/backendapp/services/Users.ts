@@ -11,7 +11,13 @@ import envVariables from '../config';
 import { ApiReturnObject, getToken, RESULT } from '../logic/ApiCommon';
 import { logging, LOGTYPE } from '../logic/Logger';
 // 共通パッケージからインポート
-import { StaffErrorMessage, LOGINID_PATTERN, PASSWORD_PATTERN } from '@jesgo/common';
+import {
+  StaffErrorMessage,
+  LOGINID_PATTERN,
+  PASSWORD_PATTERN,
+  UserSetting,
+  DEFAULT_USER_SETTING,
+} from '@jesgo/common';
 
 // 共通パッケージからの再エクスポート
 export { StaffErrorMessage, LOGINID_PATTERN, PASSWORD_PATTERN };
@@ -129,6 +135,8 @@ export interface localStorageObject {
   is_plugin_executable_update: boolean;
   is_data_manage_roll: boolean;
   is_system_manage_roll: boolean;
+  // 利用者ごとの設定: 保存確認ダイアログを表示しない(true)／表示する(false)
+  hide_save_confirm: boolean;
 }
 
 interface rollAuth {
@@ -215,13 +223,15 @@ const hasUserRollIdMaster = async (roll_id: number) => {
  * @param display_name 表示名
  * @param password パスワード(平文)
  * @param roll_id ロール種別
+ * @param hide_save_confirm 保存確認ダイアログを表示しないか否か(省略時は既定値＝表示する)
  * @returns ApiReturnObject
  */
 export const signUpUser = async (
   name: string,
   display_name: string,
   password: string,
-  roll_id: number
+  roll_id: number,
+  hide_save_confirm: boolean = DEFAULT_USER_SETTING.hide_save_confirm
 ): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'signUpUser');
 
@@ -297,17 +307,32 @@ export const signUpUser = async (
           'Users',
           'signUpUser'
         );
+        // 削除済みの利用者を再登録する場合も新規登録と同じ扱いとし、
+        // 以前の保存確認の表示設定は引き継がない(指定が無ければ既定値＝表示する)
         ret = await dbAccess.query(
-          'UPDATE jesgo_user set name = $1, display_name = $2, password_hash = $3, roll_id = $4, deleted = false WHERE user_id = $5',
-          [name, display_name, hashedPassword, Number(roll_id), updateId]
+          'UPDATE jesgo_user set name = $1, display_name = $2, password_hash = $3, roll_id = $4, deleted = false, hide_save_confirm = $6 WHERE user_id = $5',
+          [
+            name,
+            display_name,
+            hashedPassword,
+            Number(roll_id),
+            updateId,
+            hide_save_confirm,
+          ]
         );
         await dbAccess.end();
       } else {
         //insert
         logging(LOGTYPE.INFO, 'User insert', 'Users', 'signUpUser');
         ret = await dbAccess.query(
-          'INSERT INTO jesgo_user (name, display_name, password_hash, roll_id) VALUES ($1, $2, $3, $4)',
-          [name, display_name, hashedPassword, Number(roll_id)]
+          'INSERT INTO jesgo_user (name, display_name, password_hash, roll_id, hide_save_confirm) VALUES ($1, $2, $3, $4, $5)',
+          [
+            name,
+            display_name,
+            hashedPassword,
+            Number(roll_id),
+            hide_save_confirm,
+          ]
         );
         await dbAccess.end();
       }
@@ -395,22 +420,27 @@ export const changePassword = async (
  * ユーザの既存編集
  * 権限：管理者
  * 必要情報を入力し、ユーザ情報を編集する
- 入力：ユーザID、ログイン名、表示名、パスワード(平文)、ロール種別
+ 入力：ユーザID、ログイン名、表示名、パスワード(平文)、ロール種別、保存確認の表示設定
  返却：TRUEorFALSE
- * @param name 
- * @param password 
- * @returns 
+ * @param name
+ * @param password
+ * @param hide_save_confirm 保存確認ダイアログを表示しないか否か。未指定(undefined)の場合は変更しない
+ * @returns
  */
 export const editUserProfile = async (
   user_id: number,
   name: string,
   display_name: string,
   password: string,
-  roll_id: number
+  roll_id: number,
+  hide_save_confirm?: boolean
 ): Promise<ApiReturnObject> => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'editUserProfile');
 
   let result = RESULT.NORMAL_TERMINATION;
+
+  // 保存確認の表示設定は、指定があった場合のみ同じUPDATE文で更新する(未指定なら従来どおりのSQL)
+  const hasSaveConfirmSetting = hide_save_confirm !== undefined;
 
   // パスワード変更フラグ
   let passwordChange = false;
@@ -427,8 +457,12 @@ export const editUserProfile = async (
 
       //update文を発行
       const ret = await dbAccess.query(
-        'UPDATE jesgo_user SET display_name = $1, password_hash = $2, roll_id = $3 WHERE user_id = $4',
-        [display_name, hashedPassword, roll_id, user_id]
+        hasSaveConfirmSetting
+          ? 'UPDATE jesgo_user SET display_name = $1, password_hash = $2, roll_id = $3, hide_save_confirm = $5 WHERE user_id = $4'
+          : 'UPDATE jesgo_user SET display_name = $1, password_hash = $2, roll_id = $3 WHERE user_id = $4',
+        hasSaveConfirmSetting
+          ? [display_name, hashedPassword, roll_id, user_id, hide_save_confirm]
+          : [display_name, hashedPassword, roll_id, user_id]
       );
       await dbAccess.end();
       if (ret != null) {
@@ -449,8 +483,12 @@ export const editUserProfile = async (
     }
   } else {
     const ret = await dbAccess.query(
-      'UPDATE jesgo_user SET display_name = $1, roll_id = $2 WHERE user_id = $3',
-      [display_name, roll_id, user_id]
+      hasSaveConfirmSetting
+        ? 'UPDATE jesgo_user SET display_name = $1, roll_id = $2, hide_save_confirm = $4 WHERE user_id = $3'
+        : 'UPDATE jesgo_user SET display_name = $1, roll_id = $2 WHERE user_id = $3',
+      hasSaveConfirmSetting
+        ? [display_name, roll_id, user_id, hide_save_confirm]
+        : [display_name, roll_id, user_id]
     );
     await dbAccess.end();
     if (ret != null) {
@@ -465,6 +503,100 @@ export const editUserProfile = async (
     }
   }
   return { statusNum: result, body: null };
+};
+
+/**
+ * 利用者ごとの設定の取得
+ * 権限：本人(呼び出し元でJWTから取り出したuser_idを渡すこと。リクエストで指定されたIDを渡さない)
+ * @param user_id 設定を取得する利用者のID
+ * @returns 利用者ごとの設定(UserSetting)
+ */
+export const getUserSetting = async (
+  user_id: number
+): Promise<ApiReturnObject> => {
+  logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'getUserSetting');
+
+  const dbAccess = new DbAccess();
+  try {
+    await dbAccess.connectWithConf();
+    const ret = (await dbAccess.query(
+      'SELECT hide_save_confirm FROM jesgo_user WHERE user_id = $1 AND (deleted IS NULL OR deleted = false)',
+      [user_id]
+    )) as { hide_save_confirm: boolean | null }[];
+
+    if (ret.length === 0) {
+      logging(
+        LOGTYPE.ERROR,
+        `利用者が見つかりません user_id: ${user_id}`,
+        'Users',
+        'getUserSetting'
+      );
+      return { statusNum: RESULT.FAILED_USER_ERROR, body: null };
+    }
+
+    const setting: UserSetting = {
+      // NULLは既定値(表示する)として扱う
+      hide_save_confirm: ret[0].hide_save_confirm === true,
+    };
+    return { statusNum: RESULT.NORMAL_TERMINATION, body: setting };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラー';
+    logging(LOGTYPE.ERROR, errorMessage, 'Users', 'getUserSetting');
+    return { statusNum: RESULT.FAILED_USER_ERROR, body: null };
+  } finally {
+    await dbAccess.end();
+  }
+};
+
+/**
+ * 利用者ごとの設定の更新
+ * 権限：本人(呼び出し元でJWTから取り出したuser_idを渡すこと。リクエストで指定されたIDを渡さない)
+ * @param user_id 設定を更新する利用者のID
+ * @param setting 更新後の設定
+ * @returns 更新後の設定(UserSetting)
+ */
+export const updateUserSetting = async (
+  user_id: number,
+  setting: UserSetting
+): Promise<ApiReturnObject> => {
+  logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'updateUserSetting');
+
+  const dbAccess = new DbAccess();
+  try {
+    await dbAccess.connectWithConf();
+    const rowCount = (await dbAccess.query(
+      'UPDATE jesgo_user SET hide_save_confirm = $1 WHERE user_id = $2 AND (deleted IS NULL OR deleted = false)',
+      [setting.hide_save_confirm, user_id],
+      'update'
+    )) as number | null;
+
+    if (rowCount !== 1) {
+      logging(
+        LOGTYPE.ERROR,
+        `利用者ごとの設定を更新できませんでした user_id: ${user_id}`,
+        'Users',
+        'updateUserSetting'
+      );
+      return { statusNum: RESULT.FAILED_USER_ERROR, body: null };
+    }
+
+    logging(
+      LOGTYPE.INFO,
+      `success user_id: ${user_id}`,
+      'Users',
+      'updateUserSetting'
+    );
+    const saved: UserSetting = {
+      hide_save_confirm: setting.hide_save_confirm,
+    };
+    return { statusNum: RESULT.NORMAL_TERMINATION, body: saved };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラー';
+    logging(LOGTYPE.ERROR, errorMessage, 'Users', 'updateUserSetting');
+    return { statusNum: RESULT.FAILED_USER_ERROR, body: null };
+  } finally {
+    await dbAccess.end();
+  }
 };
 
 /**
@@ -701,6 +833,27 @@ export const loginUser = async (
     'SELECT login, view, add, edit, remove, plugin_registerable, plugin_executable_select, plugin_executable_update, data_manage, system_manage FROM jesgo_user_roll WHERE roll_id = $1 and (deleted = false or deleted IS NULL)',
     [ret[0].roll_id]
   )) as rollAuth[];
+
+  // 利用者ごとの設定(保存確認の表示設定)を取得する。
+  // 列が未追加(DB更新が未適用)などで取得できない場合でもログインは継続し、既定値(表示する)として扱う
+  let hideSaveConfirm: boolean = DEFAULT_USER_SETTING.hide_save_confirm;
+  try {
+    const settingRows = (await dbAccess.query(
+      'SELECT hide_save_confirm FROM jesgo_user WHERE user_id = $1',
+      [ret[0].user_id]
+    )) as { hide_save_confirm: boolean | null }[];
+    if (settingRows.length > 0) {
+      hideSaveConfirm = settingRows[0].hide_save_confirm === true;
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラー';
+    logging(
+      LOGTYPE.ERROR,
+      `利用者ごとの設定を取得できないため既定値を使用します: ${errorMessage}`,
+      'Users',
+      'loginUser'
+    );
+  }
   await dbAccess.end();
 
   // ログイン権限ない場合はエラーを返す
@@ -727,6 +880,7 @@ export const loginUser = async (
       is_plugin_executable_update: roll[0].plugin_executable_update,
       is_data_manage_roll: roll[0].data_manage,
       is_system_manage_roll: roll[0].system_manage,
+      hide_save_confirm: hideSaveConfirm,
     };
     const tokens = generateTokens(ret[0]);
     returnObj.token = tokens.token;
@@ -802,7 +956,8 @@ export const searchUser = async (): Promise<ApiReturnObject> => {
   await dbAccess.connectWithConf();
   const dbRows: dbRow[] = (await dbAccess.query(
     `SELECT 
-    u.user_id, u.name, u.display_name, u.roll_id, m.title as rolltitle
+    u.user_id, u.name, u.display_name, u.roll_id, m.title as rolltitle,
+    COALESCE(u.hide_save_confirm, false) as hide_save_confirm
     FROM jesgo_user u LEFT JOIN jesgo_user_roll m
     ON u.roll_id = m.roll_id
     WHERE u.deleted = false and u.roll_id <> 999 and  u.name <> 'system' and u.name <> 'systemuser'

@@ -9,6 +9,9 @@ export * from './types/api';
 // 設定関連
 export * from './types/config';
 
+// 利用者ごとの設定
+export * from './types/user-setting';
+
 // 定数
 export * from './constants/jesgo-tags';
 export * from './constants/field-names';

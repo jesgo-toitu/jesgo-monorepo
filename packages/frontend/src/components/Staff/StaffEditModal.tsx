@@ -7,11 +7,15 @@ import React, {
 import {
   Modal,
   Button,
+  Checkbox,
   ControlLabel,
   FormControl,
   FormGroup,
+  HelpBlock,
 } from 'react-bootstrap';
+import { DEFAULT_USER_SETTING, SaveConfirmSettingText } from '@jesgo/common';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
+import { storeHideSaveConfirm } from '../../common/UserSetting';
 import {
   DISPLAYNAME_MAX_LENGTH,
   loginIdCheck,
@@ -41,6 +45,10 @@ export const StaffEditModalDialog = (props: {
   const [password, setPassword] = useState<string>('');
   const [passwordConfilm, setPasswordConfilm] = useState<string>('');
   const [roll, setRoll] = useState<number>(-1);
+  // 保存確認ダイアログを表示しないか否か(利用者ごとの設定)
+  const [hideSaveConfirm, setHideSaveConfirm] = useState<boolean>(
+    DEFAULT_USER_SETTING.hide_save_confirm
+  );
 
   const [errShow, setErrShow] = useState(false);
   const [message, setMessage] = useState<string>('');
@@ -73,11 +81,14 @@ export const StaffEditModalDialog = (props: {
       setLoginId(data.name);
       setDisplayName(data.display_name);
       setRoll(data.roll_id);
+      setHideSaveConfirm(data.hide_save_confirm === true);
     } else {
       setUserId(-1);
       setLoginId('');
       setDisplayName('');
       setRoll(-1);
+      // 新規登録時は既定値(表示する)
+      setHideSaveConfirm(DEFAULT_USER_SETTING.hide_save_confirm);
     }
     setPassword('');
     setPasswordConfilm('');
@@ -126,6 +137,12 @@ export const StaffEditModalDialog = (props: {
       default:
         break;
     }
+  };
+
+  // 保存確認の表示設定の変更
+  const onChangeHideSaveConfirm = (event: React.FormEvent<Checkbox>) => {
+    const eventTarget = event.target as EventTarget & HTMLInputElement;
+    setHideSaveConfirm(eventTarget.checked);
   };
 
   // 入力チェック
@@ -193,6 +210,7 @@ export const StaffEditModalDialog = (props: {
       display_name: displayName,
       password,
       roll_id: roll,
+      hide_save_confirm: hideSaveConfirm,
     });
     if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
       // eslint-disable-next-line no-alert
@@ -219,8 +237,14 @@ export const StaffEditModalDialog = (props: {
       display_name: displayName,
       password,
       roll_id: roll,
+      hide_save_confirm: hideSaveConfirm,
     });
     if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
+      // 管理者が自分自身の設定を変更した場合は、保持している本人の設定も合わせる
+      // (他の利用者の設定を変更した場合は、その利用者の次回ログインから有効になる)
+      if (userId.toString() === localStorage.getItem('user_id')) {
+        storeHideSaveConfirm(hideSaveConfirm);
+      }
       // eslint-disable-next-line no-alert
       alert('更新しました');
       onOk();
@@ -329,6 +353,17 @@ export const StaffEditModalDialog = (props: {
               onChange={onChangeItem}
               value={passwordConfilm}
             />
+          </FormGroup>
+          <FormGroup controlId="staffHideSaveConfirm">
+            <ControlLabel>保存確認の設定</ControlLabel>
+            <Checkbox
+              id="staffHideSaveConfirm"
+              checked={hideSaveConfirm}
+              onChange={onChangeHideSaveConfirm}
+            >
+              {SaveConfirmSettingText.LABEL}
+            </Checkbox>
+            <HelpBlock>{SaveConfirmSettingText.DESCRIPTION}</HelpBlock>
           </FormGroup>
         </Modal.Body>
         <Modal.Footer>

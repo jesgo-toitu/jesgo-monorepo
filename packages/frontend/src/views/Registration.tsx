@@ -74,6 +74,7 @@ import {
   OverwriteDialogPlop,
 } from '../components/common/PluginOverwriteConfirm';
 import ErrorRow from '../components/CaseRegistration/ErrorRow';
+import { isHideSaveConfirm } from '../common/UserSetting';
 
 export type reloadState = {
   isReload: boolean;
@@ -419,6 +420,13 @@ const Registration = () => {
     // 変更ない場合はそのままタブ移動。編集権限ない場合も同様
     if (IsNotUpdate() || localStorage.getItem('is_edit_roll') !== 'true') {
       setSelectedTabKey(convTabKey);
+      return;
+    }
+
+    // 利用者ごとの設定で保存確認を「表示しない」にしている場合は、
+    // 確認ダイアログを表示せずに保存する（症例単位のチェック＋「はい」の後と同じ扱い）
+    if (isHideSaveConfirm()) {
+      saveFunction(eventKey);
       return;
     }
 

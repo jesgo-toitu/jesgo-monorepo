@@ -4,8 +4,10 @@ import DropdownButton from 'react-bootstrap/lib/DropdownButton';
 import MenuItem from 'react-bootstrap/lib/MenuItem';
 import { useNavigate } from 'react-router-dom';
 import { RemoveBeforeUnloadEvent } from '../../common/CommonUtility';
+import { clearUserSetting } from '../../common/UserSetting';
 import { StaffPasswordChangeModalDialog } from '../Staff/StaffPasswordChangeModal';
 import ModalDialog from './ModalDialog';
+import { UserSettingModalDialog } from './UserSettingModal';
 
 export const UserMenu = (props: {
   title: string | null;
@@ -16,6 +18,8 @@ export const UserMenu = (props: {
   const navigate = useNavigate();
   const [show, setShow] = useState(false);
   const [showPasswordChange, setShowPassowrdChange] = useState(false);
+  // 利用者ごとの設定(保存確認の表示設定)ダイアログの表示有無
+  const [showUserSetting, setShowUserSetting] = useState(false);
 
   const handleShow = () => {
     if (isConfirm === null || isConfirm()) {
@@ -25,6 +29,14 @@ export const UserMenu = (props: {
 
   const handlPasswordChenge = useCallback(() => {
     setShowPassowrdChange(true);
+  }, []);
+
+  const handleUserSetting = useCallback(() => {
+    setShowUserSetting(true);
+  }, []);
+
+  const closeUserSetting = useCallback(() => {
+    setShowUserSetting(false);
   }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -52,7 +64,10 @@ export const UserMenu = (props: {
     localStorage.removeItem('is_plugin_executable_update');
     localStorage.removeItem('is_data_manage_roll');
     localStorage.removeItem('is_system_manage_roll');
-    
+
+    // 利用者ごとの設定を削除（次にログインする利用者へ引き継がない）
+    clearUserSetting();
+
     // プリセットIDは保持（次回ログイン時に使用）
     // localStorage.removeItem('selected_preset_id'); // コメントアウト：保持する
     
@@ -81,6 +96,7 @@ export const UserMenu = (props: {
           id={`dropdown-basic-${0}`}
         >
           <MenuItem onSelect={handlPasswordChenge}>パスワード変更</MenuItem>
+          <MenuItem onSelect={handleUserSetting}>保存確認の設定</MenuItem>
           <MenuItem onSelect={handleShow}>ログアウト</MenuItem>
         </DropdownButton>
       </ButtonToolbar>
@@ -90,6 +106,13 @@ export const UserMenu = (props: {
         onOk={() => modalOkPasswordchange()}
         onCancel={() => modalCancelPasswoedChange()}
         title="JESGO パスワード変更"
+      />
+      <UserSettingModalDialog
+        show={showUserSetting}
+        onHide={() => modalHide()}
+        onOk={closeUserSetting}
+        onCancel={closeUserSetting}
+        title="JESGO 保存確認の設定"
       />
       <ModalDialog
         show={show}
