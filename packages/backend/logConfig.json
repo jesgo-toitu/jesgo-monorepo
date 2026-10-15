@@ -4,7 +4,8 @@
         "type": "dateFile",
         "filename": "log/system.log",
         "pattern": "-yyyy-MM-dd",
-        "alwaysIncludePattern": true
+        "alwaysIncludePattern": true,
+        "numBackups": 1
       },
       "console": {
         "type": "console"
