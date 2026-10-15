@@ -8,6 +8,7 @@ import {
   IsNotUpdate,
 } from '../../common/CaseRegistrationUtility';
 import SaveCommand, { responseResult } from '../../common/DBUtility';
+import { isHideSaveConfirm } from '../../common/UserSetting';
 import store from '../../store';
 import {
   dispSchemaIdAndDocumentIdDefine,
@@ -207,6 +208,13 @@ export const createTabs = (
     // 変更ない場合は保存しないでタブ移動。編集権限ない場合も同様
     if (IsNotUpdate() || localStorage.getItem('is_edit_roll') !== 'true') {
       setSelectedTabKey(convTabKey);
+      return;
+    }
+
+    // 利用者ごとの設定で保存確認を「表示しない」にしている場合は、
+    // 確認ダイアログを表示せずに保存する（症例単位のチェック＋「はい」の後と同じ扱い）
+    if (isHideSaveConfirm()) {
+      saveFunction(eventKey);
       return;
     }
 

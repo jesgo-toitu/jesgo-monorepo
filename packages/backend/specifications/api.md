@@ -33,6 +33,7 @@ FORMAT: 1A
       is_plugin_executable_update: boolean;
       is_data_manage_roll: boolean;
       is_system_manage_roll: boolean;
+      hide_save_confirm: boolean;
     }
     ```
 
@@ -133,6 +134,7 @@ DB に保存されているすべての利用者情報を取得する。
       displayName: string;
       rollId: number;
       rolltitle: string;
+      hide_save_confirm: boolean; // 保存確認ダイアログを表示しない(true)／表示する(false)
     }[]
     ```
 
@@ -149,6 +151,7 @@ DB に保存されているすべての利用者情報を取得する。
   - display_name (string): 利用者名(画面表示用)
   - password (string): パスワード
   - roll_id (number): 割り当てられるロール ID
+  - hide_save_confirm (boolean): 保存確認ダイアログを表示しない場合 true。省略可(省略時は false＝表示する)。真偽値以外を指定した場合はエラー
 
 - Response 200 (application/json)
 
@@ -213,6 +216,7 @@ JWT によるログイン中のユーザ ID の照合が行われ自身のパス
   - display_name (string): 変更先の表示名
   - password (string): 変更先のパスワード、未指定あるいは空文字の場合変更なし
   - roll_id (number): 変更先のロール ID
+  - hide_save_confirm (boolean): 保存確認ダイアログを表示しない場合 true。省略可(省略時は変更なし)。真偽値以外を指定した場合はエラー
 
 - Response 200 (application/json)
 
@@ -220,6 +224,47 @@ JWT によるログイン中のユーザ ID の照合が行われ自身のパス
 
     ```
     null(ステータスコードのみ)
+    ```
+
+## 利用者ごとの設定取得 [/getUserSetting]
+
+### 利用者ごとの設定取得 [GET]
+
+ログイン中の利用者本人の設定を取得する。  
+対象の利用者は JWT から決まる。利用者 ID を指定することはできず、他の利用者の設定は取得できない。  
+必要権限: ログイン、閲覧
+
+- Response 200 (application/json)
+
+  - Body
+
+    ```
+    {
+      hide_save_confirm: boolean; // 保存確認ダイアログを表示しない(true)／表示する(false。既定)
+    }
+    ```
+
+## 利用者ごとの設定更新 [/updateUserSetting]
+
+### 利用者ごとの設定更新 [POST]
+
+ログイン中の利用者本人の設定を更新する。  
+対象の利用者は JWT から決まる。リクエストに利用者 ID を含めても無視され、他の利用者の設定は変更できない。  
+他の利用者の設定は、システム管理者が利用者情報更新(/editUser)で変更する。  
+必要権限: ログイン、閲覧
+
+- RequestBody
+
+  - hide_save_confirm (boolean): 保存確認ダイアログを表示しない場合 true、表示する場合 false。必須。真偽値以外を指定した場合はエラー
+
+- Response 200 (application/json)
+
+  - Body
+
+    ```
+    {
+      hide_save_confirm: boolean; // 更新後の値
+    }
     ```
 
 ## 権限一覧取得 [/getUserRollList]

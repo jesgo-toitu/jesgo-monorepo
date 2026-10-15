@@ -119,7 +119,7 @@ docker exec jesgo-postgres-dev postgres --version    # 17.11
 # 4. データベース初期化の確認（ERROR / FATAL が 0 件であること）
 docker logs jesgo-postgres-dev 2>&1 | grep -iE "error|fatal"
 
-# 5. 初期化スクリプトが 29 本実行されたことの確認
+# 5. 初期化スクリプトが 30 本実行されたことの確認
 docker logs jesgo-postgres-dev 2>&1 | grep -c "running /docker-entrypoint-initdb.d"
 ```
 

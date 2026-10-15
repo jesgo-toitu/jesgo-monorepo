@@ -118,6 +118,7 @@ UTF-8
 | password_hash | text    |             |            | パスワードをハッシュ化したもの             |
 | roll_id       | integer | FK,NOT NULL |            | ユーザの権限設定内容への外部参照           |
 | deleted       | boolean | FALSE       |            |                                            |
+| hide_save_confirm | boolean | NOT NULL | FALSE | 症例登録画面の保存確認ダイアログを表示しないか否か(利用者ごとの設定)。TRUE:表示しない(未保存の変更がある状態でタブを切り替えると確認なしで保存する)／FALSE:表示する |
 
 ### 補足
 
