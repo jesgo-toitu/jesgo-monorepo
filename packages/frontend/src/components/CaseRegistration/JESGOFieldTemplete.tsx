@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 // eslint-disable-next-line import/no-unresolved
 import { JSONSchema7, JSONSchema7Type } from 'json-schema';
 import {
@@ -149,6 +149,9 @@ export namespace JESGOFiledTemplete {
       }
     }
 
+    // この配列フィールド自身の要素（visibleWhenの表示制御の対象を、この配列の中に限定するために使用）
+    const arrayFieldRef = useRef<HTMLDivElement>(null);
+
     // jesgo:ui:visibleWhen
     const visibleWhenCondition: VisibleWhenItem[] = useMemo(() => {
       const conditions: VisibleWhenItem[] = [];
@@ -200,7 +203,14 @@ export namespace JESGOFiledTemplete {
             const itemId = editItem.children.props.idSchema[
               condition.parentItemName
             ]?.$id as string;
-            const element = itemId ? document.getElementById(itemId) : null;
+            // 同じ種類のドキュメントを複数表示している場合はidが重複するため、
+            // 画面全体ではなく、この配列フィールドの中から要素を取得する
+            const element =
+              itemId && arrayFieldRef.current
+                ? arrayFieldRef.current.querySelector<HTMLElement>(
+                    `[id="${itemId.replace(/["\\]/g, '\\$&')}"]`
+                  )
+                : null;
             if (element) {
               let parentElement = element.parentElement
               // 単位付きフィールドではもう一つ上の階層がdiv.visiblewhenとなる
@@ -240,7 +250,7 @@ export namespace JESGOFiledTemplete {
     }, [formData, props.items, visibleWhenCondition]);
    
     return (
-      <div>
+      <div ref={arrayFieldRef}>
         {/* eslint-disable-next-line react/destructuring-assignment */}
         <fieldset className={props.className} id={props.idSchema.$id}>
           <legend id={id}>
