@@ -75,6 +75,9 @@ export interface formDataState {
   }[];
   processedDocumentIds: [string, string][];
   formDataInputStates: Map<string, boolean>;
+  // 開いたときに版と形の合わない値を置き直した文書のID
+  // 読込時点のデータ（loadData）もあわせて置き直しているため、保存時に DB の内容と異なることをここで判断する
+  versionAlignedDocumentIds: string[];
 }
 
 export interface dispSchemaIdAndDocumentIdDefine {
@@ -198,6 +201,7 @@ const createInitialState = (): formDataState => ({
   deletedDocuments: [],
   processedDocumentIds: [],
   formDataInputStates: new Map(),
+  versionAlignedDocumentIds: [],
 });
 
 const initialState: formDataState = createInitialState();
@@ -707,6 +711,7 @@ const formDataReducer: Reducer<
 
         // 差分比較用に読込時点のデータを保存
         copyState.loadData = lodash.cloneDeep(copyState.saveData);
+        copyState.versionAlignedDocumentIds = [];
 
         copyState.formDatas.clear();
 
@@ -729,6 +734,21 @@ const formDataReducer: Reducer<
           action.parentTabsId,
           action.selectedChildTabId
         );
+        break;
+      }
+
+      // 開いただけで版と形の合わない値を置き直した場合に、読込時点のデータも同じ値にそろえる
+      // 置き直しは表示のためであり、利用者の変更ではないため「未保存の変更あり」として扱わない
+      case 'ALIGN_LOAD_DATA': {
+        const loadDoc = copyState.loadData.jesgo_document.find(
+          (p) => p.key === action.documentId
+        );
+        if (loadDoc) {
+          loadDoc.value.document = lodash.cloneDeep(action.formData); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+          if (!copyState.versionAlignedDocumentIds.includes(action.documentId)) {
+            copyState.versionAlignedDocumentIds.push(action.documentId);
+          }
+        }
         break;
       }
 

@@ -5,6 +5,7 @@ import MenuItem from 'react-bootstrap/lib/MenuItem';
 import { useNavigate } from 'react-router-dom';
 import { RemoveBeforeUnloadEvent } from '../../common/CommonUtility';
 import { clearUserSetting } from '../../common/UserSetting';
+import { clearPatientListViewState } from '../../common/PatientListViewState';
 import { StaffPasswordChangeModalDialog } from '../Staff/StaffPasswordChangeModal';
 import ModalDialog from './ModalDialog';
 import { UserSettingModalDialog } from './UserSettingModal';
@@ -67,6 +68,9 @@ export const UserMenu = (props: {
 
     // 利用者ごとの設定を削除（次にログインする利用者へ引き継がない）
     clearUserSetting();
+
+    // 患者リストの検索・絞り込みの状態を削除（次にログインする利用者へ引き継がない）
+    clearPatientListViewState();
 
     // プリセットIDは保持（次回ログイン時に使用）
     // localStorage.removeItem('selected_preset_id'); // コメントアウト：保持する

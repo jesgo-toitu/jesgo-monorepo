@@ -6,7 +6,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Form, { FormProps, IChangeEvent } from '@rjsf/core';
 import { Dispatch } from 'redux';
 import { JSONSchema7 } from 'webpack/node_modules/schema-utils/declarations/ValidationError';
-import { JSONSchema7Definition } from 'json-schema'; // eslint-disable-line import/no-unresolved
+import { JSONSchema7Definition, JSONSchema7 as JSONSchema7Json } from 'json-schema'; // eslint-disable-line import/no-unresolved
 import JSONPointer from 'jsonpointer';
 import { JESGOFiledTemplete } from './JESGOFieldTemplete';
 import { JESGOComp } from './JESGOComponent';
@@ -15,6 +15,7 @@ import {
   AddJesgoError,
   GetVersionedFormData,
   isNotEmptyObject,
+  IsNotUpdate,
 } from '../../common/CaseRegistrationUtility';
 import { RegistrationErrors } from './Definition';
 import { CreateUISchema } from './UISchemaUtility';
@@ -31,6 +32,7 @@ import {
 } from '../../common/DBUtility';
 import { dispSchemaIdAndDocumentIdDefine } from '../../store/formDataReducer';
 import { Const } from '../../common/Const';
+import { NormalizeVersionedValues } from '@jesgo/common';
 
 interface CustomDivFormProp extends FormProps<any> {
   // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -157,6 +159,40 @@ const CustomDivForm = (props: CustomDivFormProp) => {
     orgSchemaRef.current = orgSchemaForClear;
   }
 
+  // 版の切り替えで形の合わなくなった値を、版の切り替え前の値として見える形に置き直す
+  // 形の合う値はそのまま（同じ参照）になるため、版の切り替えが無い文書には影響しない
+  let versionSchema: JSONSchema7Json | undefined;
+  if (orgSchemaForClear) {
+    const rawFormData = formData;
+    versionSchema = CustomSchemaWithoutAppend({
+      orgSchema: orgSchemaForClear,
+      formData,
+    }) as unknown as JSONSchema7Json;
+    const alignedFormData = NormalizeVersionedValues(formData, versionSchema);
+    if (alignedFormData !== rawFormData) {
+      // 利用者がまだ何も変更していない（読込時点のデータと編集中のデータが同じ）ときの置き直しは、
+      // 開いただけで起きる表示のための置き直しである。読込時点のデータも同じ値にそろえ、
+      // 開いただけでは「未保存の変更あり」にしない（保存確認・破棄確認・タブ切り替え時の保存が起きない）。
+      // 描画の時点で判断するため、スキーマの取得と症例の読み込みの順序に左右されない。
+      // 日付の変更など利用者の変更の後の置き直しは、そろえずに「変更あり」のままにする
+      if (IsNotUpdate()) {
+        dispatch({
+          type: 'ALIGN_LOAD_DATA',
+          documentId,
+          formData: alignedFormData,
+        });
+      }
+      formData = alignedFormData;
+      schema = CustomSchema({ orgSchema: orgSchemaForClear, formData });
+      // 再表示後の最初の変更の検出に使う値も、置き直した値に合わせる
+      if (displayedFormDataSourceRef.current === rawFormData) {
+        displayedFormDataSourceRef.current = formData;
+        displayedFormDataRef.current =
+          (lodash.cloneDeep(formData) as Record<string, unknown>) ?? {};
+      }
+    }
+  }
+
   // validationエラーの取得
   let errors = store.getState().formDataReducer.extraErrors;
   if (errors) {
@@ -180,7 +216,8 @@ const CustomDivForm = (props: CustomDivFormProp) => {
     documentId,
     schemaId,
     schema,
-    thisDocument?.value.deleted
+    thisDocument?.value.deleted,
+    versionSchema
   );
 
   // 前後で変更がある場合にエラーをセットして画面更新

@@ -14,6 +14,8 @@ interface PaginationProps {
   pageSize: number;
   /** 総件数 */
   totalCount: number;
+  /** 初期表示と異なる絞り込みが一覧に効いている場合は true（件数の横に「絞り込み中」と表示する） */
+  isFiltered: boolean;
   /** 表示件数の選択肢 */
   pageSizeOptions: number[];
   /** ページ変更時のコールバック */
@@ -30,6 +32,7 @@ const Pagination: React.FC<PaginationProps> = ({
   currentPage,
   pageSize,
   totalCount,
+  isFiltered,
   pageSizeOptions,
   onPageChange,
   onPageSizeChange,
@@ -105,6 +108,9 @@ const Pagination: React.FC<PaginationProps> = ({
           </span>
         ) : (
           <span>0件</span>
+        )}
+        {isFiltered && (
+          <span className="list-filter-count-notice">（絞り込み中）</span>
         )}
       </div>
 

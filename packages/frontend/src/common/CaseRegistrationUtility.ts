@@ -9,8 +9,10 @@ import {
   jesgoDocumentObjDefine,
   SaveDataObjDefine,
 } from '../store/formDataReducer';
+import { FindVersionMismatchGuides } from '@jesgo/common';
 import {
   CustomSchema,
+  CustomSchemaWithoutAppend,
   getPropItemsAndNames,
   GetSchemaInfo,
 } from '../components/CaseRegistration/SchemaUtility';
@@ -563,7 +565,15 @@ export const validateJesgoDocument = (saveData: SaveDataObjDefine) => {
       // jesgo:errorの検証を追加
       // プラグイン実行後にjesgo:errorがデータベースに保存された場合、
       // 再読み込み時にエラーが表示されるようにする
-      AddJesgoError(errors, formData, documentId, schemaId, schema);
+      AddJesgoError(
+        errors,
+        formData,
+        documentId,
+        schemaId,
+        schema,
+        false,
+        CustomSchemaWithoutAppend({ orgSchema: schema, formData })
+      );
     }
   });
   return errors;
@@ -1312,30 +1322,88 @@ export const OpenOutputViewScript = (win: typeof window, srcData: string) => {
  * @param notAdd [true]jesgo:errorを追加しない(削除フラグを渡す想定)
  * @returns
  */
+/**
+ * 版の切り替え前の値が残っている項目について、エラー一覧に出す案内を作る
+ * 判定は @jesgo/common の FindVersionMismatchGuides（患者リストの「エラーあり」と同じ規則）による。
+ * 開いた直後は、患者リストで印の付く文書にだけ、かつ必ず案内が出る。
+ * 開いた後に利用者が新しい欄へ入力した項目は、入力した時点で案内を消す
+ * @param formData 文書の値（表示・編集中）
+ * @param versionSchema 文書の版のスキーマ（参照・条件を展開したもの）
+ * @param baseline 開いた時点の文書の値（読込時点のデータ）。新しい文書では undefined
+ * @returns 案内（無ければ空）
+ */
+export const createVersionMismatchMessages = (
+  formData: any,
+  versionSchema: JSONSchema7,
+  baseline: unknown
+): ValidationItem[] =>
+  FindVersionMismatchGuides(formData, baseline, versionSchema).map(
+    (finding) => {
+      const itemName = finding.path.join(' > ');
+      let guide: string;
+      if (finding.newValueFilled) {
+        // 新しい欄にすでに値がある（保存時に新しい欄の値が正となる）
+        guide =
+          '新しい欄の値と食い違いが無いかを確認し、保存してください（保存すると新しい欄の値が正となり、版の切り替え前の値は取り除かれます）。';
+      } else if (finding.hasCurrentField) {
+        guide =
+          '値を確認して新しい欄に入力し直し、保存してください（保存すると版の切り替え前の値は取り除かれます）。';
+      } else {
+        guide =
+          'この版には入力し直す欄がありません。日付が正しいかを確認し、不要であれば × で削除して保存してください。';
+      }
+      return {
+        // eslint-disable-next-line no-irregular-whitespace
+        message: `　　[ ${itemName} ] スキーマの版の切り替え前の値が残っています。${guide}`,
+        validateType: VALIDATE_TYPE.VersionMismatch,
+      };
+    }
+  );
+
 export const AddJesgoError = (
   paramErrors: RegistrationErrors[],
   formData: any,
   documentId: string,
   schemaId: number,
   schema: JSONSchema7,
-  notAdd = false
+  notAdd = false,
+  versionSchema: JSONSchema7 | undefined = undefined
 ) => {
   // jesgo:errorを取得
   const jesgoErrors = popJesgoError(formData);
   const errors = paramErrors;
+
+  // 版の切り替え前の値の案内は、文書の版のスキーマが渡された場合だけ作り直す
+  const updateVersionMessages = versionSchema !== undefined;
 
   // 元々あったjesgo:errorのエラーはクリアする
   const targetErr = errors.find((p) => p.documentId === documentId);
   if (targetErr) {
     // jesgo:errorは除く
     const filteredMsg = targetErr.validationResult.messages.filter(
-      (q) => q.validateType !== VALIDATE_TYPE.JesgoError
+      (q) =>
+        q.validateType !== VALIDATE_TYPE.JesgoError &&
+        !(updateVersionMessages && q.validateType === VALIDATE_TYPE.VersionMismatch)
     );
     targetErr.validationResult.messages = filteredMsg;
   }
   // jesgo:errorクリア処理↑ここまで↑
 
-  if (jesgoErrors.length > 0 && !notAdd) {
+  const versionMessages =
+    versionSchema !== undefined && !notAdd
+      ? createVersionMismatchMessages(
+          formData,
+          versionSchema,
+          // 開いた時点の値（読込時点のデータ）
+          store
+            .getState()
+            .formDataReducer.loadData.jesgo_document.find(
+              (p) => p.key === documentId
+            )?.value.document
+        )
+      : [];
+
+  if ((jesgoErrors.length > 0 || versionMessages.length > 0) && !notAdd) {
     // エラー一覧に対象ドキュメントがない場合は新規追加する
     let tmpErr = errors.find((p) => p.documentId === documentId);
     if (!tmpErr) {
@@ -1393,6 +1461,9 @@ export const AddJesgoError = (
         });
       }
     });
+
+    // 版の切り替え前の値の案内
+    messages.push(...versionMessages);
   }
 
   return errors;
