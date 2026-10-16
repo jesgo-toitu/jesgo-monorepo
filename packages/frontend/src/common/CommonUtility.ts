@@ -3,6 +3,7 @@
 import Encoding from 'encoding-japanese';
 import { NavigateFunction } from 'react-router-dom';
 import store from '../store';
+import { loadPatientListViewState } from './PatientListViewState';
 // 共通パッケージからインポート
 import {
   calcAge,
@@ -102,6 +103,12 @@ export const toUTF8 = (sjisString: string) => {
  */
 export const backToPatientsList = (navigate: NavigateFunction) => {
   // 遷移前の検索条件のパラメータを付与する
+  // （患者リスト画面は保持している表示状態から条件を復元する。アドレスの条件は表示状態と同じもの）
+  const viewState = loadPatientListViewState();
+  if (viewState && viewState.query) {
+    navigate(`/Patients?${viewState.query}`);
+    return;
+  }
   const topMenuInfo = store.getState().commonReducer.topMenuInfo;
   if (topMenuInfo && topMenuInfo.paramString) {
     navigate(`/Patients${topMenuInfo.paramString}`);

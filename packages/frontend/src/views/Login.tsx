@@ -11,6 +11,7 @@ import { storeSchemaInfo } from '../components/CaseRegistration/SchemaUtility';
 import { LoadPluginList } from '../common/DBUtility';
 import { jesgoPluginColumns } from '../common/Plugin';
 import { storeHideSaveConfirm } from '../common/UserSetting';
+import { clearPatientListViewState } from '../common/PatientListViewState';
 
 export interface localStorageObject {
   user_id: number;
@@ -139,6 +140,9 @@ export const Login = () => {
           isDetail: false
         },
       });
+      // 患者リストの検索・絞り込みの状態はログインのたびに初期表示に戻す
+      // （同じ端末で前にログインしていた利用者の条件を引き継がない）
+      clearPatientListViewState();
 
       navigate('/Patients');
     } else if (returnApiObject.statusNum === RESULT.NETWORK_ERROR) {

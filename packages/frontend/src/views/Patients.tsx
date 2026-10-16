@@ -3,8 +3,7 @@
 /* eslint-disable jsx-a11y/control-has-associated-label */
 /* eslint-disable jsx-a11y/anchor-has-content */
 /* eslint-disable jsx-a11y/anchor-is-valid */
-import lodash from 'lodash';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Navbar,
@@ -43,9 +42,22 @@ import SearchDateComponent, {
 } from '../components/common/SearchDateComponent';
 import { reloadState } from './Registration';
 import { LoadPluginList } from '../common/DBUtility';
-import store from '../store';
 import { PresetField, DocumentContent, PatientInfo, transformDocuments, formatPatientRow, convertToCsvFormat } from '../common/PresetPatientDisplay';
 import { GetSchemaInfo } from '../components/CaseRegistration/SchemaUtility';
+import {
+  INITIAL_SEARCH_WORD,
+  PATIENT_LIST_PAGE_SIZE_OPTIONS,
+  PATIENT_LIST_VIEW_STATE_VERSION,
+  PatientListMenuView,
+  PatientListSearchWord,
+  PatientListViewState,
+  PresetFilterConditions,
+  clampPage,
+  getActiveFilterLabels,
+  loadPatientListViewState,
+  reconcileViewStateWithPreset,
+  savePatientListViewState,
+} from '../common/PatientListViewState';
 
 const UNIT_TYPE = {
   DAY: 0,
@@ -89,21 +101,56 @@ const makeSelectDate = (
   return dateList;
 };
 
-const initialSearchWord = {
-  cancerType: 'all',
-  showOnlyTumorRegistry: false,
-  checkOfDiagnosisDate: false,
-  checkOfEventDate: false,
-  checkOfBlankFields: false,
-  blankFields: {
-    advancedStage: false,
-    pathlogicalDiagnosis: false,
-    initialTreatment: false,
-    complications: false,
-    threeYearPrognosis: false,
-    fiveYearPrognosis: false,
-  },
-  showProgressAndRecurrence: false,
+// 検索条件の初期値（ログイン直後の初期表示と同じ）
+const initialSearchWord: PatientListSearchWord = INITIAL_SEARCH_WORD;
+
+/**
+ * 検索メニュー・詳細表示メニューの開閉に応じた表示のクラス
+ * @param view メニューの開閉
+ */
+const getMenuViewClasses = (view: PatientListMenuView) => {
+  switch (view) {
+    case 'simpleSearch':
+      return {
+        searchFormOpen: 'search-form-opened block',
+        simpleSearchButtons: 'block',
+        detailSearchOpen: 'hidden',
+        tableMode: 'search_on',
+      };
+    case 'detailSearch':
+      return {
+        searchFormOpen: 'search-form-opened block',
+        simpleSearchButtons: 'hidden',
+        detailSearchOpen: 'detail-form-opened block',
+        tableMode: 'detail_on',
+      };
+    default:
+      return {
+        searchFormOpen: 'hidden',
+        simpleSearchButtons: 'hidden',
+        detailSearchOpen: 'hidden',
+        tableMode: 'normal',
+      };
+  }
+};
+
+/**
+ * 画面を開くときに、保持していた表示状態を読み出す
+ * （症例画面などから戻ったとき・再読み込みしたときに、離れる直前の状態に戻すため）
+ * @param search 画面を開いたときのアドレスの検索部分
+ * @returns 表示状態。保持していない場合は null（初期表示）
+ */
+const restoreViewStateOnMount = (
+  search: string
+): PatientListViewState | null => {
+  const saved = loadPatientListViewState();
+  if (!saved) return null;
+  const presetIdParam = new URLSearchParams(search).get('presetId');
+  return reconcileViewStateWithPreset(
+    saved,
+    presetIdParam,
+    localStorage.getItem('selected_preset_id')
+  );
 };
 
 const makeSelectDataFromStorage = (columnType: string): string[] => {
@@ -120,80 +167,33 @@ const makeSelectDataFromStorage = (columnType: string): string[] => {
   return dataList;
 };
 
-const setSearchDateUI = (
-  searchValue: string | null,
-  setSearchDateInfoDataSet: React.Dispatch<
-    React.SetStateAction<searchDateInfoDataSet | undefined>
-  >
-) => {
-  const dataset: searchDateInfoDataSet = {
-    fromInfo: {
-      year: '',
-      month: '',
-      day: '',
-    },
-    toInfo: {
-      year: '',
-      month: '',
-      day: '',
-    },
-    isRange: false,
-    searchType: '年次',
-  };
-
-  if (!searchValue) {
-    setSearchDateInfoDataSet(dataset);
-    return;
-  }
-
-  const dateArray = JSON.parse(searchValue) as string[];
-  dataset.isRange = dateArray.length > 1;
-  // from
-  if (dateArray[0]) {
-    const splitDate = dateArray[0].split('-');
-    if (splitDate[0]) {
-      dataset.fromInfo.year = splitDate[0];
-      dataset.searchType = '年次';
-    }
-    if (splitDate[1]) {
-      dataset.fromInfo.month = splitDate[1];
-      dataset.searchType = '月次';
-    }
-    if (splitDate[2]) {
-      dataset.fromInfo.day = splitDate[2];
-      dataset.searchType = '日次';
-    }
-  }
-  // To
-  if (dateArray[1]) {
-    const splitDate = dateArray[1].split('-');
-    if (splitDate[0]) {
-      dataset.toInfo.year = splitDate[0];
-    }
-    if (splitDate[1]) {
-      dataset.toInfo.month = splitDate[1];
-    }
-    if (splitDate[2]) {
-      dataset.toInfo.day = splitDate[2];
-    }
-  }
-
-  setSearchDateInfoDataSet(dataset);
-};
-
 const Patients = () => {
   const navigate = useNavigate();
   const url: string = useLocation().search;
   const userName = localStorage.getItem('display_name');
-  const [searchFormOpen, setSearchFormOpen] = useState('hidden');
-  const [simpleSearchButtons, setSimpleSearchButtons] = useState('hidden');
-  const [detailSearchOpen, setDetailSearchOpen] = useState('hidden');
-  const [noSearch, setNoSearch] = useState('table-cell');
-  const [search, setSearch] = useState('hidden');
+  // 保持していた表示状態（症例画面などから戻ったとき・再読み込みしたときに復元する。
+  // 画面を開いた時点で 1 回だけ読み出し、各状態の初期値に使う）
+  const [restoredViewState] = useState<PatientListViewState | null>(() =>
+    restoreViewStateOnMount(url)
+  );
+  const restoredIsDetail = restoredViewState?.isDetail ?? false;
+  // 検索メニュー・詳細表示メニューの開閉
+  const [menuView, setMenuView] = useState<PatientListMenuView>(
+    restoredViewState?.menuView ?? 'close'
+  );
+  const { searchFormOpen, simpleSearchButtons, detailSearchOpen, tableMode } =
+    getMenuViewClasses(menuView);
+  const [noSearch, setNoSearch] = useState(
+    restoredIsDetail ? 'hidden' : 'table-cell'
+  );
+  const [search, setSearch] = useState(
+    restoredIsDetail ? 'table-cell' : 'hidden'
+  );
   const [, setProgressAndRecurrenceColumn] = useState('hidden');
-  const [listMode, setListMode] = useState(['blue', '']);
+  const [listMode, setListMode] = useState(
+    restoredIsDetail ? ['', 'blue'] : ['blue', '']
+  );
   const [userListJson, setUserListJson] = useState('');
-  const [tableMode, setTableMode] = useState('normal');
   const [facilityName, setFacilityName] = useState('');
   const [csvData, setCsvData] = useState<object[]>([]);
   const [csvFileName, setCsvFileName] = useState<string>('');
@@ -211,53 +211,201 @@ const Patients = () => {
   const [presetPatientData, setPresetPatientData] = useState<any[]>([]);
   
   // ページング関連の状態
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(50);
+  const [currentPage, setCurrentPage] = useState<number>(
+    restoredViewState?.currentPage ?? 1
+  );
+  const [pageSize, setPageSize] = useState<number>(
+    restoredViewState?.pageSize ?? 50
+  );
   const [defaultPageSize, setDefaultPageSize] = useState<number>(50);
-  const pageSizeOptions = [10, 25, 50, 100];
+  const pageSizeOptions = PATIENT_LIST_PAGE_SIZE_OPTIONS;
   const [totalCount, setTotalCount] = useState<number>(0);
   const [presetPagenationPatientData, setPresetPagenationPatientData] = useState<any[]>([]);
-  
+
   // ソート関連の状態（カスタム項目の場合は 'custom_${field_id}' 形式）
-  const [sortColumn, setSortColumn] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
+  const [sortColumn, setSortColumn] = useState<string | null>(
+    restoredViewState?.sortColumn ?? null
+  );
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(
+    restoredViewState?.sortDirection ?? null
+  );
 
   // プリセット項目の絞り込み条件の状態管理
   // field_idをキーとして、各項目の絞り込み条件を管理
   // status型の場合、valueは選択されたステータスアイコンの配列（string[]）
-  const [presetFilterConditions, setPresetFilterConditions] = useState<{
-    [fieldId: number]: {
-      enabled: boolean;
-      value: string | number | boolean | searchDateInfoDataSet | string[] | {
-        advancedStage?: boolean;
-        pathlogicalDiagnosis?: boolean;
-        initialTreatment?: boolean;
-        complications?: boolean;
-        threeYearPrognosis?: boolean;
-        fiveYearPrognosis?: boolean;
-      } | null;
-    };
-  }>({});
+  const [presetFilterConditions, setPresetFilterConditions] =
+    useState<PresetFilterConditions>(
+      restoredViewState?.presetFilterConditions ?? {}
+    );
 
-  // 初回治療開始日検索条件
+  // 初回治療開始日検索条件（両表示形式で共通）
   const [searchDateInfoInitialTreatment, setSearchDateInfoInitialTreatment] =
-    useState<searchDateInfoDataSet>();
-  // 診断日検索条件
+    useState<searchDateInfoDataSet | undefined>(
+      restoredViewState?.initialTreatmentDate ?? undefined
+    );
+  // 診断日検索条件（腫瘍登録管理表示）
   const [searchDateInfoDiagnosis, setSearchDateInfoDiagnosis] =
-    useState<searchDateInfoDataSet>();
-  // イベント日検索条件
+    useState<searchDateInfoDataSet | undefined>(
+      restoredViewState?.diagnosisDate ?? undefined
+    );
+  // イベント日検索条件（腫瘍登録管理表示）
   const [searchDateInfoEventDate, setSearchDateInfoEventDate] =
-    useState<searchDateInfoDataSet>();
+    useState<searchDateInfoDataSet | undefined>(
+      restoredViewState?.eventDate ?? undefined
+    );
   // イベント日検索種別
   const [searchDateEventDateType, setSearchDateEventDateType] =
-    useState<string>('最新');
+    useState<string>(restoredViewState?.eventDateType ?? '最新');
+
+  // 患者リスト表示用のフィルタリング条件
+  const [normalSearchWord, setNormalSearchWord] = useState<PatientListSearchWord>(
+    restoredViewState?.normalSearchWord ?? initialSearchWord
+  );
+  // 腫瘍登録管理表示用のフィルタリング条件
+  // （がん種・腫瘍登録対象のみ表示は検索メニューの条件として両表示形式で共有する。setCurrentSearchWord 参照）
+  const [tumorRegistrySearchWord, setTumorRegistrySearchWord] =
+    useState<PatientListSearchWord>(
+      restoredViewState?.tumorRegistrySearchWord ?? initialSearchWord
+    );
+
+  // 一覧の取得に使った条件
+  // （画面の条件と一覧の条件を一致させ、戻ったときに同じ条件で取り直すために保持する）
+  const [appliedViewState, setAppliedViewState] = useState<Omit<
+    PatientListViewState,
+    'menuView'
+  > | null>(null);
+  // 一覧に効いている絞り込みの名前（「絞り込み中」の表示に使う）
+  const [activeFilterLabels, setActiveFilterLabels] = useState<string[]>([]);
+  // 一覧の取り直しの要求（値が変わるたびに、その時点の画面の条件で一覧を取り直す）
+  const [listReloadRequest, setListReloadRequest] = useState<number>(0);
+  // 復元したページが、取り直した結果で存在するかを 1 回だけ確かめるための印
+  const pageCheckAfterRestoreRef = useRef<boolean>(
+    !!restoredViewState && restoredViewState.currentPage > 1
+  );
 
   const dispatch = useDispatch();
 
+  /**
+   * 表示中の表示形式の検索条件から、一覧の取得に使う検索条件（ページ・並び順を除く）を作る
+   * 検索メニューの条件（初回治療開始日・がん種・腫瘍登録対象のみ表示）と、
+   * 表示形式ごとの条件（未入力項目、腫瘍登録管理表示の診断日・イベント日）を使う
+   * @param isDetailMode 腫瘍登録管理表示の場合は true
+   */
+  const buildSearchParams = (isDetailMode: boolean): URLSearchParams => {
+    const currentSearchWord = isDetailMode
+      ? tumorRegistrySearchWord
+      : normalSearchWord;
+    const initialTreatment = generateSearchDateInfoStrings(
+      searchDateInfoInitialTreatment
+    );
+    const diagnosisDate = generateSearchDateInfoStrings(searchDateInfoDiagnosis);
+    const eventDate = generateSearchDateInfoStrings(searchDateInfoEventDate);
+
+    // URLSearchParams.set()は自動的にエンコードするため、encodeURIComponentは不要
+    const urlParams = new URLSearchParams();
+    // 初回治療開始日
+    urlParams.set('initialTreatmentDate', JSON.stringify(initialTreatment));
+    // がん種
+    urlParams.set('cancerType', currentSearchWord.cancerType);
+    // 腫瘍登録対象のみ表示
+    urlParams.set(
+      'showOnlyTumorRegistry',
+      String(currentSearchWord.showOnlyTumorRegistry)
+    );
+    // 診断日
+    if (currentSearchWord.checkOfDiagnosisDate) {
+      urlParams.set('diagnosisDate', JSON.stringify(diagnosisDate));
+    }
+    // イベント日
+    if (currentSearchWord.checkOfEventDate) {
+      urlParams.set(
+        'eventDateType',
+        searchDateEventDateType === '最新' ? '0' : '1'
+      );
+      urlParams.set('eventDate', JSON.stringify(eventDate));
+    }
+    // 未入力項目で絞り込み
+    if (currentSearchWord.checkOfBlankFields) {
+      const { blankFields } = currentSearchWord;
+      urlParams.set('advancedStage', String(blankFields.advancedStage));
+      urlParams.set(
+        'pathlogicalDiagnosis',
+        String(blankFields.pathlogicalDiagnosis)
+      );
+      urlParams.set('initialTreatment', String(blankFields.initialTreatment));
+      urlParams.set('complications', String(blankFields.complications));
+      urlParams.set(
+        'threeYearPrognosis',
+        String(blankFields.threeYearPrognosis)
+      );
+      urlParams.set('fiveYearPrognosis', String(blankFields.fiveYearPrognosis));
+    }
+    return urlParams;
+  };
+
+  /**
+   * 一覧の取得に使った条件を記録する
+   * （戻ったとき・再読み込みしたときに同じ条件で一覧を取り直すため、および「絞り込み中」の表示のため）
+   * @param isDetailMode 腫瘍登録管理表示の場合は true
+   * @param query 一覧の取得に使った検索条件（ページ・並び順を除く）
+   * @param presetFilterCount 一覧の取得に使ったプリセット項目の絞り込みの数
+   */
+  const recordAppliedViewState = (
+    isDetailMode: boolean,
+    query: string,
+    presetFilterCount: number
+  ) => {
+    const usePreset = !!(selectedPresetId && selectedPresetDetail);
+    setAppliedViewState({
+      version: PATIENT_LIST_VIEW_STATE_VERSION,
+      isDetail: isDetailMode,
+      usePreset,
+      presetId: usePreset ? selectedPresetId : null,
+      normalSearchWord,
+      tumorRegistrySearchWord,
+      initialTreatmentDate: searchDateInfoInitialTreatment ?? null,
+      diagnosisDate: searchDateInfoDiagnosis ?? null,
+      eventDate: searchDateInfoEventDate ?? null,
+      eventDateType: searchDateEventDateType,
+      presetFilterConditions,
+      sortColumn,
+      sortDirection,
+      currentPage,
+      pageSize,
+      query,
+    });
+    setActiveFilterLabels(getActiveFilterLabels(query, presetFilterCount));
+  };
+
+  /**
+   * 一覧の件数を設定する
+   * 復元したページが取り直した結果で存在しない場合（保存で該当件数が減った等）は、存在する最後のページにする
+   * @param count 件数
+   */
+  const applyTotalCount = (count: number) => {
+    setTotalCount(count);
+    if (pageCheckAfterRestoreRef.current) {
+      pageCheckAfterRestoreRef.current = false;
+      const page = clampPage(currentPage, count, pageSize);
+      if (page !== currentPage) {
+        setCurrentPage(page);
+      }
+    }
+  };
+
+  /**
+   * その時点の画面の条件で一覧を取り直す（状態の更新が反映された後に取得する）
+   */
+  const requestListReload = () => {
+    setListReloadRequest((prev) => prev + 1);
+  };
+
   const reloadPatient = async () => {
-    // URLパラメータを構築（既存の検索条件用）
-    const urlParams = new URLSearchParams(url);
-    
+    // 表示中の表示形式の検索条件でURLパラメータを構築
+    const isDetailMode = search === 'table-cell';
+    const urlParams = buildSearchParams(isDetailMode);
+    const query = urlParams.toString();
+
     // ページング、ソート、表示件数のパラメータを追加
     urlParams.set('page', currentPage.toString());
     urlParams.set('pageSize', pageSize.toString());
@@ -301,7 +449,10 @@ const Patients = () => {
         }
       });
     }
-    
+
+    // 一覧の取得に使う条件を記録
+    recordAppliedViewState(isDetailMode, query, filterConditions.length);
+
     // プリセット項目の絞り込み条件がある場合はPOSTリクエストで送信
     if (filterConditions.length > 0) {
       const requestBody = {
@@ -311,10 +462,10 @@ const Patients = () => {
         sortDirection: sortDirection || undefined,
         presetFilters: filterConditions,
       };
-      
+
       const queryString = urlParams.toString();
       const apiUrl = queryString ? `patientlist?${queryString}` : 'patientlist';
-      
+
       // 患者情報取得APIを呼ぶ（POSTリクエスト）
       const returnApiObject = await apiAccess(
         METHOD_TYPE.POST,
@@ -327,10 +478,10 @@ const Patients = () => {
         setUserListJson(JSON.stringify(responseBody));
         // 総件数を設定
         if (responseBody.totalCount !== undefined) {
-          setTotalCount(responseBody.totalCount);
+          applyTotalCount(responseBody.totalCount);
         } else {
           // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-          setTotalCount(responseBody.data?.length || 0);
+          applyTotalCount(responseBody.data?.length || 0);
         }
       } else {
         navigate('/login');
@@ -351,10 +502,10 @@ const Patients = () => {
         setUserListJson(JSON.stringify(responseBody));
         // 総件数を設定
         if (responseBody.totalCount !== undefined) {
-          setTotalCount(responseBody.totalCount);
+          applyTotalCount(responseBody.totalCount);
         } else {
           // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-          setTotalCount(responseBody.data?.length || 0);
+          applyTotalCount(responseBody.data?.length || 0);
         }
       } else {
         navigate('/login');
@@ -393,16 +544,17 @@ const Patients = () => {
           const pageSize = Number(returned.default_page_size);
           const validPageSize = isNaN(pageSize) || ![10, 25, 50, 100].includes(pageSize) ? 100 : pageSize;
           setDefaultPageSize(validPageSize);
-          setPageSize(validPageSize);
+          // 戻ったとき・再読み込みしたときは、離れる直前の表示件数を使う
+          if (!restoredViewState) setPageSize(validPageSize);
         } else {
           // APIエラー時はデフォルト値（100）を使用
           setDefaultPageSize(100);
-          setPageSize(100);
+          if (!restoredViewState) setPageSize(100);
         }
       } catch (error) {
         // エラー時はデフォルト値（100）を使用
         setDefaultPageSize(100);
-        setPageSize(100);
+        if (!restoredViewState) setPageSize(100);
       }
     };
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -459,7 +611,7 @@ const Patients = () => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     f();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, pageSize, sortColumn, sortDirection, selectedPresetId, selectedPresetDetail]);
+  }, [currentPage, pageSize, sortColumn, sortDirection, selectedPresetId, selectedPresetDetail, listReloadRequest]);
 
   useEffect(() => {
     // カスタムプリセットの場合、フロント側でページング
@@ -469,6 +621,39 @@ const Patients = () => {
       setPresetPagenationPatientData(presetPatientData.slice(startIndex, startIndex + pageSize));
     }
   }, [presetPatientData, currentPage, pageSize, sortColumn, sortDirection, selectedPresetId, selectedPresetDetail]);
+
+  // 一覧の取得に使った条件とメニューの開閉を保持する
+  // （症例画面などから戻ったとき・再読み込みしたときに、同じ条件で一覧を取り直すため）
+  useEffect(() => {
+    if (!appliedViewState) return;
+    savePatientListViewState({ ...appliedViewState, menuView });
+    dispatch({
+      type: 'SET_TOP_MENU_INFO',
+      topMenuInfo: {
+        paramString: `?${appliedViewState.query}`,
+        isDetail: appliedViewState.isDetail,
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedViewState, menuView]);
+
+  // アドレスを一覧の取得に使った条件にそろえる（ブラウザの履歴は積まない）
+  // CSV作成はアドレスの条件で対象を決めるため、画面の一覧と同じ検索条件になる
+  useEffect(() => {
+    if (!appliedViewState) return;
+    const target = `?${appliedViewState.query}`;
+    if (url === target) return;
+    // アドレスにも一覧にも絞り込みが無い場合（ログイン直後など）は書き換えない
+    // （CSVの対象は同じ全件のため、CSVの作り直しを避ける）
+    if (
+      getActiveFilterLabels(url, 0).length === 0 &&
+      getActiveFilterLabels(appliedViewState.query, 0).length === 0
+    ) {
+      return;
+    }
+    navigate(`/Patients${target}`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedViewState]);
 
   useEffect(() => {
     const f = async () => {
@@ -486,26 +671,9 @@ const Patients = () => {
         setFacilityName(returned.facility_name);
       }
 
-      // URLパラメータから検索条件などをUIに復元
-      // 先に表示モードを設定してから、プリセットデータを取得する必要がある
-      const topMenuInfo = store.getState().commonReducer.topMenuInfo;
-      let isDetailMode = false;
-      if (topMenuInfo) {
-        // 患者リスト表示、腫瘍登録管理表示の選択状態を復元
-        // ただし、この時点ではselectedPresetIdがまだ設定されていないため、
-        // changeListColumn内のloadPresetPatientListは呼ばれない
-        // 状態のみを設定する
-        isDetailMode = topMenuInfo.isDetail;
-        if (topMenuInfo.isDetail) {
-          setListMode(['', 'blue']);
-          setNoSearch('hidden');
-          setSearch('table-cell');
-        } else {
-          setListMode(['blue', '']);
-          setNoSearch('table-cell');
-          setSearch('hidden');
-        }
-      }
+      // 表示形式は、保持していた表示状態から状態の初期値として復元済み
+      // （isDetailModeを渡すことで、状態更新のタイミングに依存しない）
+      const isDetailMode = restoredIsDetail;
 
       // URLパラメータからプリセットIDを取得
       const searchParam = new URLSearchParams(url);
@@ -515,13 +683,19 @@ const Patients = () => {
       const presetId = presetIdParam || getSavedPresetId();
       
       // プリセットIDの優先順位に従って取得を試みる
-      if (presetId) {
+      if (restoredViewState && !restoredViewState.usePreset && !presetIdParam) {
+        // 離れる直前が通常表示だった場合は通常表示のまま戻す
+        setSelectedPresetId(null);
+        setSelectedPresetDetail(null);
+        await reloadPatient();
+        setIsLoading(false);
+      } else if (presetId) {
         // ① URLパラメータまたはlocalStorageから取得したプリセットIDを使用
         setSelectedPresetId(presetId);
         // プリセット選択を保存
         saveSelectedPreset(presetId);
-        // プリセット詳細を取得
-        const success = await loadPresetDetail(presetId);
+        // プリセット詳細を取得（戻ったときはページを保つ）
+        const success = await loadPresetDetail(presetId, false);
         if (!success) {
           // 取得に失敗した場合は通常モードにフォールバック
           setSelectedPresetId(null);
@@ -542,7 +716,7 @@ const Patients = () => {
         // ② プリセットIDがない場合は、presetId=1（システムプリセット）を試す
         const defaultPresetId = '1';
         setSelectedPresetId(defaultPresetId);
-        const success = await loadPresetDetail(defaultPresetId);
+        const success = await loadPresetDetail(defaultPresetId, false);
         if (!success) {
           // システムプリセットも取得に失敗した場合は通常モードで表示
           setSelectedPresetId(null);
@@ -585,75 +759,8 @@ const Patients = () => {
       // 患者リストの取得は上記の条件分岐内で完了後にsetIsLoading(false)が呼ばれる
     };
 
-    // URLパラメータから検索条件などをUIに復元
-    const topMenuInfoForSearch = store.getState().commonReducer.topMenuInfo;
-    if (topMenuInfoForSearch) {
-      const searchParam = new URLSearchParams(url);
-
-      // 表示モードに応じて適切な状態を取得
-      const isDetailMode = topMenuInfoForSearch.isDetail;
-      const targetSearchWord = isDetailMode ? tumorRegistrySearchWord : normalSearchWord;
-      const copySearchWord = lodash.cloneDeep(targetSearchWord);
-
-      // 検索条件の復元
-
-      // 腫瘍登録対象のみ
-      let paramValue = searchParam.get('showOnlyTumorRegistry');
-      copySearchWord.showOnlyTumorRegistry = paramValue === 'true';
-
-      // がん種
-      paramValue = searchParam.get('cancerType');
-      copySearchWord.cancerType = paramValue ?? '';
-
-      // 初回治療開始日
-      paramValue = searchParam.get('initialTreatmentDate');
-      setSearchDateUI(paramValue, setSearchDateInfoInitialTreatment);
-      // 診断日
-      paramValue = searchParam.get('diagnosisDate');
-      copySearchWord.checkOfDiagnosisDate = !!paramValue;
-      setSearchDateUI(paramValue, setSearchDateInfoDiagnosis);
-      // イベント日
-      paramValue = searchParam.get('eventDate');
-      copySearchWord.checkOfEventDate = !!paramValue;
-      let eventDateType = searchParam.get('eventDateType');
-      if (!eventDateType || eventDateType === '') {
-        eventDateType = '最新';
-      }
-      setSearchDateEventDateType(eventDateType);
-      setSearchDateUI(paramValue, setSearchDateInfoEventDate);
-
-      // 未入力項目
-      // 進行期
-      paramValue = searchParam.get('advancedStage');
-      copySearchWord.blankFields.advancedStage = paramValue === 'true';
-      // 診断
-      paramValue = searchParam.get('pathlogicalDiagnosis');
-      copySearchWord.blankFields.pathlogicalDiagnosis = paramValue === 'true';
-      // 初回治療
-      paramValue = searchParam.get('initialTreatment');
-      copySearchWord.blankFields.initialTreatment = paramValue === 'true';
-      // 合併症
-      paramValue = searchParam.get('complications');
-      copySearchWord.blankFields.complications = paramValue === 'true';
-      // 3年予後
-      paramValue = searchParam.get('threeYearPrognosis');
-      copySearchWord.blankFields.threeYearPrognosis = paramValue === 'true';
-      // 5年予後
-      paramValue = searchParam.get('fiveYearPrognosis');
-      copySearchWord.blankFields.fiveYearPrognosis = paramValue === 'true';
-
-      // 未入力項目で絞り込みのチェックはいずれかの項目にチェックがあればON
-      copySearchWord.checkOfBlankFields = Object.entries(
-        copySearchWord.blankFields
-      ).some((blankItem) => blankItem[1]);
-
-      // 表示モードに応じて適切な状態を設定
-      if (isDetailMode) {
-        setTumorRegistrySearchWord(copySearchWord);
-      } else {
-        setNormalSearchWord(copySearchWord);
-      }
-    }
+    // 検索条件などは、保持していた表示状態から状態の初期値として復元済み
+    // （アドレスの条件は使わない。前の利用者の条件をブラウザの履歴から復元しないため）
 
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     f();
@@ -890,21 +997,31 @@ const Patients = () => {
     generateCsvData();
   }, [url, selectedPresetId, selectedPresetDetail]);
 
-  // 患者リスト表示用のフィルタリング条件
-  const [normalSearchWord, setNormalSearchWord] = useState(initialSearchWord);
-  // 腫瘍登録管理表示用のフィルタリング条件
-  const [tumorRegistrySearchWord, setTumorRegistrySearchWord] = useState(initialSearchWord);
-  
   // 現在の表示モードに応じたフィルタリング条件を取得するヘルパー関数
   const getCurrentSearchWord = () => {
     return search === 'table-cell' ? tumorRegistrySearchWord : normalSearchWord;
   };
   
-  const setCurrentSearchWord = (newValue: typeof initialSearchWord) => {
+  const setCurrentSearchWord = (newValue: PatientListSearchWord) => {
+    // 検索メニューの条件（がん種・腫瘍登録対象のみ表示）は両表示形式で共有する
+    // （初回治療開始日はもともと両表示形式で 1 つの状態）
+    const shareCommonCondition = (
+      other: PatientListSearchWord
+    ): PatientListSearchWord =>
+      other.cancerType === newValue.cancerType &&
+      other.showOnlyTumorRegistry === newValue.showOnlyTumorRegistry
+        ? other
+        : {
+            ...other,
+            cancerType: newValue.cancerType,
+            showOnlyTumorRegistry: newValue.showOnlyTumorRegistry,
+          };
     if (search === 'table-cell') {
       setTumorRegistrySearchWord(newValue);
+      setNormalSearchWord(shareCommonCondition);
     } else {
       setNormalSearchWord(newValue);
+      setTumorRegistrySearchWord(shareCommonCondition);
     }
   };
   
@@ -922,31 +1039,8 @@ const Patients = () => {
     }
   };
 
-  const changeView = (type: string) => {
-    switch (type) {
-      case 'close':
-        setSearchFormOpen('hidden');
-        setSimpleSearchButtons('hidden');
-        setDetailSearchOpen('hidden');
-        setTableMode('normal');
-        break;
-
-      case 'simpleSearch':
-        setSearchFormOpen('search-form-opened block');
-        setSimpleSearchButtons('block');
-        setDetailSearchOpen('hidden');
-        setTableMode('search_on');
-        break;
-
-      case 'detailSearch':
-        setSearchFormOpen('search-form-opened block');
-        setSimpleSearchButtons('hidden');
-        setDetailSearchOpen('detail-form-opened block');
-        setTableMode('detail_on');
-        break;
-
-      default:
-    }
+  const changeView = (type: PatientListMenuView) => {
+    setMenuView(type);
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1084,7 +1178,7 @@ const Patients = () => {
     }
   };
 
-  const changeListColumn = async (isDetail: boolean) => {
+  const changeListColumn = (isDetail: boolean) => {
     if (isDetail) {
       setListMode(['', 'blue']);
       setNoSearch('hidden');
@@ -1103,21 +1197,10 @@ const Patients = () => {
       );
     }
 
-    dispatch({
-      type: 'SET_TOP_MENU_INFO',
-      topMenuInfo: {
-        paramString: url,
-        isDetail,
-      },
-    });
-    
-    // プリセット管理モードの場合もデータを再取得
-    // isDetailを直接渡すことで、状態更新のタイミングに依存しない
-    if (selectedPresetId && selectedPresetDetail) {
-      setIsLoading(true);
-      await loadPresetPatientList(isDetail);
-      setIsLoading(false);
-    }
+    // 切り替え後の表示形式の条件（検索メニューの条件は共有、詳細表示メニューの条件は表示形式ごと）で
+    // 一覧を取り直す（プリセット表示・通常表示とも。画面の条件と一覧の条件を一致させるため）
+    // 戻るための記録は、一覧を取得したときに更新する
+    requestListReload();
   };
 
   // 現在表示されている患者リストの一覧をJesgoCaseDefineとして返す
@@ -1293,13 +1376,18 @@ const Patients = () => {
     return false;
   };
 
-  const submit = async (type: string) => {
-    setIsLoading(true);
+  // 「検索」「表示更新」
+  const submit = () => {
     const token = localStorage.getItem('token');
     if (token == null) {
       navigate('/login');
       return;
     }
+
+    // 表示中の表示形式の条件で検索する
+    // （腫瘍登録管理表示では腫瘍登録管理表示の条件を使う。画面の条件と一覧の条件を一致させるため）
+    const isDetailMode = search === 'table-cell';
+    const currentSearchWord = getCurrentSearchWord();
 
     // 入力チェック
     // 初回治療開始日
@@ -1307,199 +1395,61 @@ const Patients = () => {
       searchDateInfoInitialTreatment
     );
     if (hasSearchDateError('初回治療開始日', initialTreatment)) {
-      setIsLoading(false);
       return;
     }
 
-    // 診断日
-    const diagnosisDate = generateSearchDateInfoStrings(
-      searchDateInfoDiagnosis
-    );
-    // 通常表示用のフィルタリング条件を使用
-    const currentSearchWord = normalSearchWord;
-    
-    if (currentSearchWord.checkOfDiagnosisDate) {
+    // 診断日（腫瘍登録管理表示）
+    if (isDetailMode && currentSearchWord.checkOfDiagnosisDate) {
+      const diagnosisDate = generateSearchDateInfoStrings(
+        searchDateInfoDiagnosis
+      );
       if (hasSearchDateError('診断日', diagnosisDate)) {
-        setIsLoading(false);
         return;
       }
     }
 
-    // イベント日
-    const eventDate = generateSearchDateInfoStrings(searchDateInfoEventDate);
-    if (currentSearchWord.checkOfEventDate) {
+    // イベント日（腫瘍登録管理表示）
+    if (isDetailMode && currentSearchWord.checkOfEventDate) {
+      const eventDate = generateSearchDateInfoStrings(searchDateInfoEventDate);
       if (hasSearchDateError('イベント日', eventDate)) {
-        setIsLoading(false);
         return;
       }
     }
 
-    const makeQueryString = () => {
-      let query = `type=${type}`;
-      // 初回治療開始日
-      query += `&initialTreatmentDate=${encodeURIComponent(
-        JSON.stringify(initialTreatment)
-      )}`;
-      // がん腫
-      query += `&cancerType=${encodeURIComponent(currentSearchWord.cancerType)}`;
-      // 腫瘍登録対象のみ表示
-      query += `&showOnlyTumorRegistry=${encodeURIComponent(
-        currentSearchWord.showOnlyTumorRegistry
-      )}`;
+    // ページを1にリセット
+    setCurrentPage(1);
 
-      // 診断日（詳細表示時のみ）
-      if (type === 'detail' && currentSearchWord.checkOfDiagnosisDate) {
-        query += `&diagnosisDate=${encodeURIComponent(
-          JSON.stringify(diagnosisDate)
-        )}`;
-      }
-
-      // イベント日（詳細表示時のみ）
-      if (type === 'detail' && currentSearchWord.checkOfEventDate) {
-        query += `&eventDateType=${encodeURIComponent(
-          searchDateEventDateType === '最新' ? '0' : '1'
-        )}`;
-        query += `&eventDate=${encodeURIComponent(
-          JSON.stringify(eventDate)
-        )}`;
-      }
-
-      // 未入力項目で絞り込み（通常表示・詳細表示の両方で使用可能）
-      if (currentSearchWord.checkOfBlankFields) {
-        query += `&advancedStage=${encodeURIComponent(
-          currentSearchWord.blankFields.advancedStage
-        )}`;
-        query += `&pathlogicalDiagnosis=${encodeURIComponent(
-          currentSearchWord.blankFields.pathlogicalDiagnosis
-        )}`;
-        query += `&initialTreatment=${encodeURIComponent(
-          currentSearchWord.blankFields.initialTreatment
-        )}`;
-        query += `&complications=${encodeURIComponent(
-          currentSearchWord.blankFields.complications
-        )}`;
-        query += `&threeYearPrognosis=${encodeURIComponent(
-          currentSearchWord.blankFields.threeYearPrognosis
-        )}`;
-        query += `&fiveYearPrognosis=${encodeURIComponent(
-          currentSearchWord.blankFields.fiveYearPrognosis
-        )}`;
-      }
-
-      return query;
-    };
-
-    const param: string = makeQueryString();
-
-    // プリセット項目の絞り込み条件をリクエストボディで送信
-    const filterConditions: any[] = [];
-    if (selectedPresetDetail && selectedPresetDetail.fields) {
-      Object.entries(presetFilterConditions).forEach(([fieldId, condition]) => {
-        const field = selectedPresetDetail.fields.find((f: PresetField) => f.field_id === Number(fieldId));
-        if (field && isValidFilterCondition(condition, field.field_type)) {
-          let filterValue: string;
-          if (field.field_type === 'date') {
-            // 日付の場合はSearchDateComponentと同じ形式で送信
-            const dateInfo = condition.value as searchDateInfoDataSet;
-            const dateStrings = generateSearchDateInfoStrings(dateInfo);
-            filterValue = JSON.stringify(dateStrings);
-          } else if (field.field_type === 'status') {
-            // status型の場合は、選択されたステータスアイコンの配列をJSON文字列として送信
-            filterValue = JSON.stringify(condition.value);
-          } else if (field.field_type === 'boolean') {
-            // bool型の場合は、チェックが有りの場合に"true"を送信
-            filterValue = condition.value === true ? 'true' : 'false';
-          } else {
-            filterValue = String(condition.value);
-          }
-          filterConditions.push({
-            field_id: Number(fieldId),
-            field_name: field.field_name,
-            field_path: field.field_path,
-            field_type: field.field_type,
-            value: filterValue,
-          });
-        }
-      });
+    if (!selectedPresetDetail) {
+      // 通常表示の場合は、従来どおり検索ごとにブラウザの履歴を積む
+      navigate(`/Patients?${buildSearchParams(isDetailMode).toString()}`);
     }
 
-    // プリセットモードの場合は、loadPresetPatientListを呼び出す（フィルタリング条件の有無に関わらず）
-    if (selectedPresetDetail) {
-      // ページを1にリセット
-      setCurrentPage(1);
-      // 腫瘍登録管理表示モードかどうかを判定
-      const isDetailMode = !!(listMode[1] && listMode[1] !== '');
-      await loadPresetPatientList(isDetailMode);
-      // URLとReduxストアを更新
-      dispatch({
-        type: 'SET_TOP_MENU_INFO',
-        topMenuInfo: {
-          paramString: `?${param}`,
-          isDetail: isDetailMode,
-        },
-      });
-      // navigateを呼び出さず、URLのみ更新
-      window.history.replaceState(null, '', `/Patients?${param}`);
-    } else {
-      // 通常モードの場合
-      // プリセット項目の絞り込み条件がある場合はPOSTリクエストで送信
-      if (filterConditions.length > 0) {
-        const requestBody = {
-          page: currentPage,
-          pageSize: pageSize,
-          sortColumn: sortColumn || undefined,
-          sortDirection: sortDirection || undefined,
-          presetFilters: filterConditions,
-        };
-        
-        // 患者情報取得APIを呼ぶ（POSTリクエスト）
-        const returnApiObject = await apiAccess(
-          METHOD_TYPE.POST,
-          `patientlist?${param}`,
-          requestBody
-        );
+    // 状態の更新（ページ）が反映された後に、画面の条件で一覧を取り直す
+    // （アドレスと戻るための記録は、一覧を取得したときに更新する）
+    requestListReload();
+  };
 
-        if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
-          setUserListJson(JSON.stringify(returnApiObject.body));
-          // ページを1にリセット
-          setCurrentPage(1);
-          dispatch({
-            type: 'SET_TOP_MENU_INFO',
-            topMenuInfo: {
-              paramString: `?${param}`,
-              isDetail: listMode[1] && listMode[1] !== '',
-            },
-          });
-          // navigateを呼び出さず、URLのみ更新
-          window.history.replaceState(null, '', `/Patients?${param}`);
-        } else {
-          navigate('/login');
-        }
-      } else {
-        // プリセット項目の絞り込み条件がない場合はGETリクエストで送信
-        const returnApiObject = await apiAccess(
-          METHOD_TYPE.GET,
-          `patientlist?${param}`
-        );
-
-        if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
-          setUserListJson(JSON.stringify(returnApiObject.body));
-          // ページを1にリセット
-          setCurrentPage(1);
-          dispatch({
-            type: 'SET_TOP_MENU_INFO',
-            topMenuInfo: {
-              paramString: `?${param}`,
-              isDetail: listMode[1] && listMode[1] !== '',
-            },
-          });
-          navigate(`/Patients?${param}`);
-        } else {
-          navigate('/login');
-        }
-      }
-    }
-    setIsLoading(false);
+  /**
+   * 表示の初期化
+   * 検索・詳細表示の条件、プリセット項目の絞り込み、並び順、ページ、表示件数、メニューの開閉を
+   * 初期表示と同じにして一覧を取り直す。表示形式とプリセットの選択は変えない
+   */
+  const resetListView = () => {
+    setNormalSearchWord(initialSearchWord);
+    setTumorRegistrySearchWord(initialSearchWord);
+    setSearchDateInfoInitialTreatment(undefined);
+    setSearchDateInfoDiagnosis(undefined);
+    setSearchDateInfoEventDate(undefined);
+    setSearchDateEventDateType('最新');
+    setPresetFilterConditions({});
+    setSortColumn(null);
+    setSortDirection(null);
+    setCurrentPage(1);
+    setPageSize(defaultPageSize);
+    setShowProgressAndRecurrence(false, search);
+    changeView('close');
+    pageCheckAfterRestoreRef.current = false;
+    requestListReload();
   };
 
   // イベント日種別選択時のイベント
@@ -1635,49 +1585,12 @@ const Patients = () => {
     // isDetailModeが指定されている場合はそれを使用、なければsearchの状態を確認
     const isTumorRegistryMode = isDetailMode !== undefined ? isDetailMode : (search === 'table-cell');
     if (isTumorRegistryMode) {
-      // 通常表示と同じ検索条件をURLパラメータとして生成
-      const initialTreatment = generateSearchDateInfoStrings(
-        searchDateInfoInitialTreatment
-      );
-      const diagnosisDate = generateSearchDateInfoStrings(
-        searchDateInfoDiagnosis
-      );
-      const eventDate = generateSearchDateInfoStrings(searchDateInfoEventDate);
-      
-      // 通常表示のフィルタリング処理を使用（プリセット項目のフィルタリング条件は使用しない）
-      // 腫瘍登録管理表示の場合は、腫瘍登録管理表示用のフィルタリング条件を使用
-      const currentSearchWord = isTumorRegistryMode ? tumorRegistrySearchWord : normalSearchWord;
-      
-      // URLSearchParamsを使用してクエリパラメータを構築
-      const urlParams = new URLSearchParams();
-      urlParams.set('type', 'search');
-      // 初回治療開始日
-      urlParams.set('initialTreatmentDate', JSON.stringify(initialTreatment));
-      // がん種
-      urlParams.set('cancerType', currentSearchWord.cancerType);
-      // 腫瘍登録対象のみ表示
-      urlParams.set('showOnlyTumorRegistry', String(currentSearchWord.showOnlyTumorRegistry));
-      
-      // 診断日
-      if (currentSearchWord.checkOfDiagnosisDate) {
-        urlParams.set('diagnosisDate', JSON.stringify(diagnosisDate));
-      }
-      
-      // イベント日
-      if (currentSearchWord.checkOfEventDate) {
-        urlParams.set('eventDateType', searchDateEventDateType === '最新' ? '0' : '1');
-        urlParams.set('eventDate', JSON.stringify(eventDate));
-      }
-      
-      // 未入力項目で絞り込み
-      if (currentSearchWord.checkOfBlankFields) {
-        urlParams.set('advancedStage', String(currentSearchWord.blankFields.advancedStage));
-        urlParams.set('pathlogicalDiagnosis', String(currentSearchWord.blankFields.pathlogicalDiagnosis));
-        urlParams.set('initialTreatment', String(currentSearchWord.blankFields.initialTreatment));
-        urlParams.set('complications', String(currentSearchWord.blankFields.complications));
-        urlParams.set('threeYearPrognosis', String(currentSearchWord.blankFields.threeYearPrognosis));
-        urlParams.set('fiveYearPrognosis', String(currentSearchWord.blankFields.fiveYearPrognosis));
-      }
+      // 腫瘍登録管理表示用のフィルタリング条件でURLパラメータを生成
+      // （プリセット項目のフィルタリング条件は使用しない）
+      const urlParams = buildSearchParams(true);
+      const query = urlParams.toString();
+      // 一覧の取得に使う条件を記録
+      recordAppliedViewState(true, query, 0);
       
       // ページング・ソートパラメータを追加
       urlParams.set('page', currentPage.toString());
@@ -1702,10 +1615,10 @@ const Patients = () => {
           setUserListJson(JSON.stringify(responseBody));
           // 総件数を設定
           if (responseBody.totalCount !== undefined) {
-            setTotalCount(responseBody.totalCount);
+            applyTotalCount(responseBody.totalCount);
           } else {
             // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-            setTotalCount(responseBody.data?.length || 0);
+            applyTotalCount(responseBody.data?.length || 0);
           }
         } else {
           navigate('/login');
@@ -1721,15 +1634,6 @@ const Patients = () => {
     // 「患者リスト表示」の場合は、プリセットのフィールド定義に基づいて表示
     setIsLoading(true);
     try {
-      // 通常表示と同じ検索条件をURLパラメータとして生成
-      const initialTreatment = generateSearchDateInfoStrings(
-        searchDateInfoInitialTreatment
-      );
-      const diagnosisDate = generateSearchDateInfoStrings(
-        searchDateInfoDiagnosis
-      );
-      const eventDate = generateSearchDateInfoStrings(searchDateInfoEventDate);
-      
       // プリセット項目の絞り込み条件をリクエストボディで送信
       const filterConditions: any[] = [];
       Object.entries(presetFilterConditions).forEach(([fieldId, condition]) => {
@@ -1760,39 +1664,10 @@ const Patients = () => {
         }
       });
       
-      // 通常表示と同じ検索条件をURLパラメータとして追加
-      // プリセットモードの場合は通常表示用のフィルタリング条件を使用
-      const currentSearchWord = normalSearchWord;
-      
-      // URLSearchParams.set()は自動的にエンコードするため、encodeURIComponentは不要
-      const urlParams = new URLSearchParams();
-      // 初回治療開始日
-      urlParams.set('initialTreatmentDate', JSON.stringify(initialTreatment));
-      // がん種
-      urlParams.set('cancerType', currentSearchWord.cancerType);
-      // 腫瘍登録対象のみ表示
-      urlParams.set('showOnlyTumorRegistry', String(currentSearchWord.showOnlyTumorRegistry));
-      
-      // 診断日
-      if (currentSearchWord.checkOfDiagnosisDate) {
-        urlParams.set('diagnosisDate', JSON.stringify(diagnosisDate));
-      }
-      
-      // イベント日
-      if (currentSearchWord.checkOfEventDate) {
-        urlParams.set('eventDateType', searchDateEventDateType === '最新' ? '0' : '1');
-        urlParams.set('eventDate', JSON.stringify(eventDate));
-      }
-      
-      // 未入力項目で絞り込み
-      if (currentSearchWord.checkOfBlankFields) {
-        urlParams.set('advancedStage', String(currentSearchWord.blankFields.advancedStage));
-        urlParams.set('pathlogicalDiagnosis', String(currentSearchWord.blankFields.pathlogicalDiagnosis));
-        urlParams.set('initialTreatment', String(currentSearchWord.blankFields.initialTreatment));
-        urlParams.set('complications', String(currentSearchWord.blankFields.complications));
-        urlParams.set('threeYearPrognosis', String(currentSearchWord.blankFields.threeYearPrognosis));
-        urlParams.set('fiveYearPrognosis', String(currentSearchWord.blankFields.fiveYearPrognosis));
-      }
+      // 患者リスト表示用のフィルタリング条件でURLパラメータを生成
+      const urlParams = buildSearchParams(false);
+      // 一覧の取得に使う条件を記録
+      recordAppliedViewState(false, urlParams.toString(), filterConditions.length);
 
       const isCsvExport = false;
       
@@ -1819,10 +1694,10 @@ const Patients = () => {
           if (Number(selectedPresetId) === 1) {
             // 標準プリセット（presetId=1）の場合、バックエンドから返されたtotalCountを使用
             if (responseData.totalCount !== undefined) {
-              setTotalCount(responseData.totalCount);
+              applyTotalCount(responseData.totalCount);
             } else {
               // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-              setTotalCount(responseData.data?.length || 0);
+              applyTotalCount(responseData.data?.length || 0);
             }
           }
           
@@ -1911,7 +1786,7 @@ const Patients = () => {
           // カスタムプリセット（presetId > 1）の場合、表示行数（formattedData.length）をtotalCountに設定
           // 標準プリセット（presetId = 1）の場合は、バックエンドから返されたtotalCountを使用（既に設定済み）
           if (Number(selectedPresetId) !== 1) {
-            setTotalCount(formattedData.length);
+            applyTotalCount(formattedData.length);
           }
           setPresetPatientData(formattedData);
         } else {
@@ -1942,10 +1817,10 @@ const Patients = () => {
           if (Number(selectedPresetId) === 1) {
             // 標準プリセット（presetId=1）の場合、バックエンドから返されたtotalCountを使用
             if (responseData.totalCount !== undefined) {
-              setTotalCount(responseData.totalCount);
+              applyTotalCount(responseData.totalCount);
             } else {
               // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
-              setTotalCount(responseData.data?.length || 0);
+              applyTotalCount(responseData.data?.length || 0);
             }
           }
           
@@ -2030,7 +1905,7 @@ const Patients = () => {
           // カスタムプリセット（presetId > 1）の場合、表示行数（formattedData.length）をtotalCountに設定
           // 標準プリセット（presetId = 1）の場合は、バックエンドから返されたtotalCountを使用（既に設定済み）
           if (Number(selectedPresetId) !== 1) {
-            setTotalCount(formattedData.length);
+            applyTotalCount(formattedData.length);
           }
           setPresetPatientData(formattedData);
         } else {
@@ -2045,7 +1920,11 @@ const Patients = () => {
   };
 
   // プリセット詳細を取得して表示（成功/失敗を返す）
-  const loadPresetDetail = async (presetId: string): Promise<boolean> => {
+  // resetPage: ページを1に戻す場合は true（画面を開いたときは、戻る前のページを保つため false）
+  const loadPresetDetail = async (
+    presetId: string,
+    resetPage = true
+  ): Promise<boolean> => {
     try {
       // プリセット詳細を取得
       const presetResult = await apiAccess(METHOD_TYPE.GET, `/preset-detail/${presetId}`);
@@ -2054,10 +1933,12 @@ const Patients = () => {
         const presetDetail = presetResult.body as any;
         setSelectedPresetDetail(presetDetail);
         
-        // ページを1にリセット（初回表示時のみ）
+        // ページを1にリセット
         // 注意: setCurrentPage(1)を実行するとuseEffectが実行されるため、
         // 患者リストの取得はuseEffectに任せる
-        setCurrentPage(1);
+        // （画面を開いたときは、保持していたページを保つためリセットしない。
+        //   保持していない場合は初期値が1のため同じ）
+        if (resetPage) setCurrentPage(1);
         
         return true;
       } else {
@@ -2116,6 +1997,16 @@ const Patients = () => {
         </Navbar>
         <div className="page-menu">
           <div className="search-form-closed flex">
+            {/* 初期表示と異なる絞り込みが一覧に効いていることを示す（絞り込まれた一覧を全件と誤認しないため） */}
+            {activeFilterLabels.length > 0 && (
+              <div
+                className="list-filter-notice"
+                title={`絞り込みに使っている条件：${activeFilterLabels.join('・')}`}
+              >
+                <Glyphicon glyph="filter" />
+                検索条件で絞り込み中（{activeFilterLabels.join('・')}）
+              </div>
+            )}
             <ButtonToolbar style={{ marginTop: '14px', marginBottom: '14px' }}>
               <ButtonGroup>
                 <Button title="検索" onClick={() => changeView('simpleSearch')}>
@@ -2135,6 +2026,13 @@ const Patients = () => {
                 >
                   <Glyphicon glyph="bookmark" />
                   プリセット
+                </Button>
+                <Button
+                  title="検索・絞り込みの条件、並び順、ページ、表示件数を初期表示に戻します（表示形式とプリセットの選択は変わりません）"
+                  onClick={resetListView}
+                >
+                  <Glyphicon glyph="erase" />
+                  表示の初期化
                 </Button>
                 {/*<Button
                   title={selectedPresetId ? "通常表示に切り替え" : "プリセット表示に切り替え"}
@@ -2387,7 +2285,7 @@ const Patients = () => {
               </a>
               <div className="spacer10" />
               <div className="spacer10" />
-              <a href="#" onClick={() => submit('search')}>
+              <a href="#" onClick={() => submit()}>
                 <span
                   className="glyphicon glyphicon-search"
                   aria-hidden="true"
@@ -2782,7 +2680,7 @@ const Patients = () => {
                 <Button
                   bsStyle="primary"
                   className="detail-footer-button"
-                  onClick={() => submit('detail')}
+                  onClick={() => submit()}
                 >
                   表示更新
                 </Button>
@@ -2817,6 +2715,7 @@ const Patients = () => {
                 currentPage={currentPage}
                 pageSize={pageSize}
                 totalCount={totalCount}
+                isFiltered={activeFilterLabels.length > 0}
                 pageSizeOptions={pageSizeOptions}
                 onPageChange={setCurrentPage}
                 onPageSizeChange={(newSize) => {
@@ -2847,6 +2746,7 @@ const Patients = () => {
                 currentPage={currentPage}
                 pageSize={pageSize}
                 totalCount={totalCount}
+                isFiltered={activeFilterLabels.length > 0}
                 pageSizeOptions={pageSizeOptions}
                 onPageChange={setCurrentPage}
                 onPageSizeChange={(newSize) => {
