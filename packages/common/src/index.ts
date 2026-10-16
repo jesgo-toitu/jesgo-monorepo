@@ -27,6 +27,7 @@ export * from './utils/string-utils';
 export * from './utils/array-utils';
 export * from './utils/config-loader';
 export * from './utils/document-utils';
+export * from './utils/versioned-value-utils';
 
 // バリデーション
 export * from './validation/staff-validation';

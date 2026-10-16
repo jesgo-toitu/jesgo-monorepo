@@ -7,10 +7,12 @@ import React, { Dispatch } from 'react';
 import lodash from 'lodash';
 import {
   CustomSchema,
+  CustomSchemaWithoutAppend,
   getJesgoSchemaPropValue,
   GetSchemaInfo,
 } from '../components/CaseRegistration/SchemaUtility';
 import {
+  getLoginUserId,
   jesgoCaseDefine,
   jesgoDocumentObjDefine,
   SaveDataObjDefine,
@@ -27,6 +29,7 @@ import { formatDate, formatDateStr } from './CommonUtility';
 import store from '../store';
 import { JSONSchema7 } from 'json-schema';
 import { GetModule, jesgoPluginColumns } from './Plugin';
+import { FinalizeVersionedValuesForSave } from '@jesgo/common';
 import staffData from '../components/Staff/StaffData';
 
 export interface responseResult {
@@ -122,6 +125,28 @@ const convertNullToUndefindForArray = (arrayObj: any[]) => {
       convertNullToUndefind(arrayItem as object);
     }
   }
+};
+
+/**
+ * 保存する文書の値を、文書の日付（event_date）で決まるスキーマの版に合わせて仕上げる
+ * - 形の合わない値・分解された値を「版の切り替え前の値」の形に直す
+ * - 同じ項目の新しい欄に値が入った旧値を取り除く
+ * @param doc 文書
+ * @returns 仕上げた値。変更が無ければ元の値（同じ参照）
+ */
+const finalizeDocumentForSchemaVersion = (
+  doc: jesgoDocumentObjDefine
+): unknown => {
+  const document: unknown = doc.value.document;
+  const schemaInfo = GetSchemaInfo(doc.value.schema_id, doc.value.event_date || null);
+  if (!schemaInfo || document === null || typeof document !== 'object') {
+    return document;
+  }
+  const resolved = CustomSchemaWithoutAppend({
+    orgSchema: schemaInfo.document_schema,
+    formData: document,
+  });
+  return FinalizeVersionedValuesForSave(document, resolved);
 };
 
 // 症例情報(1患者)読み込み
@@ -511,6 +536,11 @@ const SaveChanges = async (
 
   const copySaveData = lodash.cloneDeep(saveData);
 
+  // 開いたときに版と形の合わない値を置き直した文書（DB の内容と異なる）のID
+  const versionAlignedDocumentIds =
+    store.getState().formDataReducer.versionAlignedDocumentIds;
+  const updateDate = new Date().toLocaleString('ja-JP');
+
   // jesgo_document更新
   let deathDate = '';
   // 更新用関数定義
@@ -523,6 +553,23 @@ const SaveChanges = async (
         jesgoDoc,
         jesgoDoc.value.document
       );
+
+      // 版の切り替え前の値の仕上げ: 同じ項目の新しい欄に値が入った旧値を取り除き、
+      // 形の合わない値・分解された値を旧値の形に直してから保存する
+      const beforeFinalize: unknown = jesgoDoc.value.document;
+      // eslint-disable-next-line no-param-reassign
+      jesgoDoc.value.document = finalizeDocumentForSchemaVersion(jesgoDoc);
+      // 仕上げ・開いたときの置き直しで文書の内容が DB と変わる場合は、値の入力時・スキーマの切り替え時と同じく
+      // 文書の最終更新日時と更新者を更新する（症例の最終更新日時だけが変わり、文書の更新が検知できない状態にしない）
+      if (
+        jesgoDoc.value.document !== beforeFinalize ||
+        versionAlignedDocumentIds.includes(jesgoDoc.key)
+      ) {
+        // eslint-disable-next-line no-param-reassign
+        jesgoDoc.value.last_updated = updateDate;
+        // eslint-disable-next-line no-param-reassign
+        jesgoDoc.value.registrant = getLoginUserId();
+      }
 
       // 死亡日時は最初に見つかったものを取得
       if (!deathDate) {
@@ -676,6 +723,7 @@ export const hasJesgoCaseError = (
         (p) =>
           p.validateType !== VALIDATE_TYPE.Message &&
           p.validateType !== VALIDATE_TYPE.JesgoError &&
+          p.validateType !== VALIDATE_TYPE.VersionMismatch &&
           p.validateType !== VALIDATE_TYPE.Required
       ).length > 0
     ) {
