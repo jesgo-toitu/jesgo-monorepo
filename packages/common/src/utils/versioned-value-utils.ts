@@ -12,6 +12,7 @@
  * - 値の意味は変えない。新しい欄へ自動で移さない（新しい欄は空欄のまま）
  * - 旧値は × で消せる（スキーマに無い項目と同じ既存の扱い）
  * - 同じ項目の新しい欄に値を入れて保存したときは、その項目の旧値を取り除く
+ * - 新しい欄が空のまま旧値だけが残っているときは保存できない（IsSaveBlockingVersionMismatch）
  *
  * あわせて、版と形の合わない値が文書に残っているかを判定する（患者リストの「エラーあり」と、
  * 症例登録画面のエラー一覧で使う）。判定は読み取りのみで、文書を書き換えない。
@@ -363,7 +364,8 @@ const finalizeObject = (
         // まとまりの中の旧値（例: 2026 年版の POLE変異 のまとまりの中）
         filled = hasNewValue(value, ownName, schema);
       }
-      if (filled) delete target()[key];
+      // 中身の無い旧値（× で消した後に項目名だけが残ったもの）も取り除く
+      if (filled || isEmptyVersionedValue(v)) delete target()[key];
       return;
     }
 
@@ -392,6 +394,9 @@ const finalizeObject = (
  * 保存する文書の値を仕上げる
  * - 形の合わない値を旧値として置き直す（NormalizeVersionedValues と同じ）
  * - 同じ項目の新しい欄に値が入っている旧値を取り除く（新しい欄が空なら旧値は残す）
+ * - 中身の無い旧値（× で消した後に項目名だけが残ったもの）を取り除く
+ * 新しい欄が空の旧値が残る文書は、保存前の検証で保存を止める（IsSaveBlockingVersionMismatch）。
+ * ここでは旧値を黙って消さない
  * 変更が無ければ、受け取ったものと同じ参照を返す
  * @param document 文書の値
  * @param schema 保存する版のスキーマ（文書の最上位のスキーマ）
@@ -429,6 +434,21 @@ export interface VersionMismatchFinding {
 }
 
 /**
+ * 保存を止める対象か
+ * 形の変わった項目の「版の切り替え前の値」が残り、同じ項目の新しい欄が空のもの（入力し直すか × で消すまで保存できない）。
+ * 次のものは保存を止めない（保存時に旧値を取り除く、または読み取り専用のまま残す）
+ * - 新しい欄にすでに値がある旧値（保存時に取り除く）
+ * - 文書の版に入力し直す欄が無い値（新しい版に無い項目と同じ扱い。例: 2023 年版の文書に残る値）
+ * - 置き直せない分解された形（同上）
+ * 表示・編集中の値を置き直した結果（NormalizeVersionedValues 後）の判定結果に対して使う
+ * @param finding 判定結果
+ */
+export const IsSaveBlockingVersionMismatch = (
+  finding: VersionMismatchFinding
+): boolean =>
+  finding.kind === 'old_value' && finding.hasCurrentField && !finding.newValueFilled;
+
+/**
  * 文書の中に、版と形の合わない値（版の切り替え前の値・分解された形・形の合わない値）が残っているかを調べる
  * 文書は変更しない
  * - 旧版にしかない項目（スキーマに無い項目）や、型は同じで選択肢だけ変わった項目は対象にしない
@@ -454,9 +474,14 @@ export const FindVersionMismatchValues = (
   ): void => {
     Object.entries(value).forEach(([key, v]) => {
       if (isDocumentRoot && key === JESGO_ERROR_KEY) return;
+      // 値の無い項目は保存されないため対象にしない
+      // （× で消した直後は、項目名が残ったまま値が undefined になっている）
+      if (v === undefined) return;
 
       const base = getBaseNameOfOldValueKey(key);
       if (base !== undefined) {
+        // 中身の無い旧値（まとまりの中の欄をすべて × で消したものなど）は残っていないものとみなす
+        if (isEmptyVersionedValue(v)) return;
         const siblingSchema = getPropertySchema(node, base, ctx);
         const isOwnGroup = ownName === base && definedKeysOf(node).length > 0;
         findings.push({

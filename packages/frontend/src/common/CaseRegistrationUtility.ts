@@ -9,7 +9,11 @@ import {
   jesgoDocumentObjDefine,
   SaveDataObjDefine,
 } from '../store/formDataReducer';
-import { FindVersionMismatchGuides } from '@jesgo/common';
+import { openOutputViewWithData } from './OutputViewMessage';
+import {
+  FindVersionMismatchGuides,
+  IsSaveBlockingVersionMismatch,
+} from '@jesgo/common';
 import {
   CustomSchema,
   CustomSchemaWithoutAppend,
@@ -1201,132 +1205,68 @@ export const GetBeforeInheritDocumentData = (
 
 /**
  * データ出力用画面オープン
+ * 受け渡しの手順と、送り元の確かめ方は OutputViewMessage.ts を参照
  * @param win window
  * @param srcData 出力するデータ
+ * @param type 'overwritelog' の場合はドキュメント上書き結果（表形式）として表示する
  */
 export const OpenOutputView = (
   win: typeof window,
   srcData: any,
   type: string | undefined = undefined
 ) => {
-  // デバッグ: OpenOutputView関数が呼ばれたことをログ出力
-  console.log('[OpenOutputView] 関数が呼ばれました:', {
-    type: typeof srcData,
-    isArray: Array.isArray(srcData),
-    isNull: srcData == null,
-    value: srcData,
-    stringified: typeof srcData === 'string' ? srcData : JSON.stringify(srcData),
-  });
-
   // 表示データがない場合は開かない
   if (srcData == null) {
-    console.log('[OpenOutputView] srcDataがnullのため、処理を中断');
+    console.log('[OpenOutputView] 表示するデータが無いため、出力画面を開きません');
     return;
   }
 
-  const postData = (e: MessageEvent<any>) => {
-    console.log('[OpenOutputView] postDataが呼ばれました:', {
-      origin: e.origin,
-      winOrigin: win.location.origin,
-      data: e.data,
-      isOutputReady: e.data === 'output_ready',
-      originMatch: e.origin === win.location.origin,
-    });
-
-    // 画面の準備ができたらデータをポストする
-    if (e.origin === win.location.origin && e.data === 'output_ready') {
-      console.log('[OpenOutputView] 条件が満たされました。データを送信します。');
-      // デバッグ: OpenOutputViewで受け取ったデータをログ出力
-      console.log('[OpenOutputView] 送信するデータ:', {
-        type: typeof srcData,
-        isArray: Array.isArray(srcData),
-        isNull: srcData == null,
-        value: srcData,
-        stringified: typeof srcData === 'string' ? srcData : JSON.stringify(srcData),
-      });
-
-      if (type && type === 'overwritelog') {
-        e.source?.postMessage({ viewerType: 'log', csvData: srcData });
-      } else {
-        // すべてのデータをjsonDataプロパティとして送信（配列、オブジェクト、文字列すべて）
-        // これにより、受信側で一貫してjsonDataプロパティをチェックできる
-        let dataToSend: any;
-        
-        if (typeof srcData === 'string') {
-          // 文字列の場合、JSON文字列の可能性をチェック
-          try {
-            const parsed = JSON.parse(srcData);
-            console.log('[OpenOutputView] JSON文字列をパースしてJSON形式として送信');
-            dataToSend = { jsonData: parsed };
-          } catch {
-            // JSONでない場合は文字列として送信（文字列の場合はjsonDataプロパティを使わない）
-            console.log('[OpenOutputView] 文字列として送信');
-            dataToSend = srcData;
-          }
-        } else {
-          // 配列、オブジェクト、その他の場合、すべてjsonDataとして送信
-          console.log('[OpenOutputView] データをjsonDataプロパティとして送信:', {
-            type: typeof srcData,
-            isArray: Array.isArray(srcData),
-          });
-          dataToSend = { jsonData: srcData };
-        }
-        
-        console.log('[OpenOutputView] 実際に送信するデータ:', dataToSend);
-        e.source?.postMessage(dataToSend);
-      }
-      win.removeEventListener('message', postData, false);
-    } else {
-      console.log('[OpenOutputView] 条件が満たされませんでした:', {
-        originMatch: e.origin === win.location.origin,
-        dataMatch: e.data === 'output_ready',
-        actualData: e.data,
-        actualOrigin: e.origin,
-      });
+  // 出力画面に渡す形にする（出力画面が受け付ける既存の形）
+  let payload: unknown;
+  if (type && type === 'overwritelog') {
+    payload = { viewerType: 'log', csvData: srcData };
+  } else if (typeof srcData === 'string') {
+    // 文字列の場合、JSON文字列であれば jsonData として渡す。JSONでない場合は文字列のまま渡す
+    try {
+      payload = { jsonData: JSON.parse(srcData) as unknown };
+    } catch {
+      payload = srcData;
     }
-  };
+  } else {
+    // 配列、オブジェクト、その他の場合、すべてjsonDataとして渡す
+    payload = { jsonData: srcData as unknown };
+  }
 
-  console.log('[OpenOutputView] messageイベントリスナーを登録しました');
-  win.addEventListener('message', postData, false);
-
-  console.log('[OpenOutputView] OutputViewウィンドウを開きます');
-  win.open('/OutputView', 'outputview');
+  // データの中身（患者情報を含み得る）はログに出さない
+  console.log('[OpenOutputView] 出力画面を開きます:', {
+    type: typeof srcData,
+    isArray: Array.isArray(srcData),
+    viewerType: type ?? '',
+  });
+  openOutputViewWithData(win, payload);
 };
 
+/**
+ * スクリプト表示用に出力画面を開く
+ * @param win window
+ * @param srcData 表示するスクリプト
+ */
 export const OpenOutputViewScript = (win: typeof window, srcData: string) => {
   // 表示データがない場合は開かない
   if (srcData == null) {
     return;
   }
-  const postFunc = (e: MessageEvent) => {
-    // 画面の準備ができたらデータをポストする
-    if (e.origin === win.location.origin && e.data === 'output_ready') {
-      e.source?.postMessage(srcData);
-    }
-
-    win.removeEventListener('message', postFunc);
-  };
-
-  win.addEventListener('message', postFunc, false);
-
-  win.open('/OutputView', 'outputview');
+  openOutputViewWithData(win, srcData);
 };
 
-/**
- * エラー一覧にjesgo:errorの内容を追加する
- * @param formData
- * @param paramErrors
- * @param documentId
- * @param schemaId
- * @param schema
- * @param notAdd [true]jesgo:errorを追加しない(削除フラグを渡す想定)
- * @returns
- */
 /**
  * 版の切り替え前の値が残っている項目について、エラー一覧に出す案内を作る
  * 判定は @jesgo/common の FindVersionMismatchGuides（患者リストの「エラーあり」と同じ規則）による。
  * 開いた直後は、患者リストで印の付く文書にだけ、かつ必ず案内が出る。
- * 開いた後に利用者が新しい欄へ入力した項目は、入力した時点で案内を消す
+ * 開いた後に利用者が新しい欄へ入力した項目は、入力した時点で案内を消す。
+ * 新しい欄が空のまま版の切り替え前の値だけが残っている項目（IsSaveBlockingVersionMismatch）は、
+ * 【要修正】として入力エラーと同じく保存を止める（VALIDATE_TYPE.VersionMismatchOldValue）。
+ * それ以外（新しい欄に値がある項目、入力し直す欄が無い項目）は、保存を妨げない案内とする
  * @param formData 文書の値（表示・編集中）
  * @param versionSchema 文書の版のスキーマ（参照・条件を展開したもの）
  * @param baseline 開いた時点の文書の値（読込時点のデータ）。新しい文書では undefined
@@ -1340,6 +1280,14 @@ export const createVersionMismatchMessages = (
   FindVersionMismatchGuides(formData, baseline, versionSchema).map(
     (finding) => {
       const itemName = finding.path.join(' > ');
+      if (IsSaveBlockingVersionMismatch(finding)) {
+        // 新しい欄が空のまま版の切り替え前の値だけが残っている（入力し直すか × で消すまで保存できない）
+        return {
+          // eslint-disable-next-line no-irregular-whitespace
+          message: `　　[ ${itemName} ] 【要修正】スキーマの版の切り替え前の値が残っています。新しい欄に入力し直すか、不要であれば × ボタンで版の切り替え前の値を消してから保存してください。`,
+          validateType: VALIDATE_TYPE.VersionMismatchOldValue,
+        };
+      }
       let guide: string;
       if (finding.newValueFilled) {
         // 新しい欄にすでに値がある（保存時に新しい欄の値が正となる）
@@ -1360,6 +1308,22 @@ export const createVersionMismatchMessages = (
     }
   );
 
+/** 版の切り替え前の値の案内（保存を妨げないもの・保存を止めるもの）か */
+const isVersionMismatchMessage = (item: ValidationItem): boolean =>
+  item.validateType === VALIDATE_TYPE.VersionMismatch ||
+  item.validateType === VALIDATE_TYPE.VersionMismatchOldValue;
+
+/**
+ * エラー一覧にjesgo:errorの内容を追加する
+ * @param formData
+ * @param paramErrors
+ * @param documentId
+ * @param schemaId
+ * @param schema
+ * @param notAdd [true]jesgo:errorを追加しない(削除フラグを渡す想定)
+ * @param versionSchema 文書の版のスキーマ。渡された場合は、版の切り替え前の値の案内も作り直す
+ * @returns
+ */
 export const AddJesgoError = (
   paramErrors: RegistrationErrors[],
   formData: any,
@@ -1383,7 +1347,7 @@ export const AddJesgoError = (
     const filteredMsg = targetErr.validationResult.messages.filter(
       (q) =>
         q.validateType !== VALIDATE_TYPE.JesgoError &&
-        !(updateVersionMessages && q.validateType === VALIDATE_TYPE.VersionMismatch)
+        !(updateVersionMessages && isVersionMismatchMessage(q))
     );
     targetErr.validationResult.messages = filteredMsg;
   }

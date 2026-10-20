@@ -5,6 +5,7 @@ import {
   FindVersionMismatchGuides,
   FindVersionMismatchValues,
   HasVersionMismatchValue,
+  IsSaveBlockingVersionMismatch,
   NormalizeVersionedValues,
   VersionedSchema,
 } from '@jesgo/common';
@@ -203,5 +204,138 @@ describe('症例登録画面の案内（患者リストの印との一致）', (
       [PROFILE]: { POLE変異: { ...(profileOf(shown).POLE変異 as Doc), POLE変異: 'あり' } },
     };
     expect(FindVersionMismatchGuides(edited, shown, schema2026)).toEqual([]);
+  });
+});
+
+describe('保存を止める対象（新しい欄が空のまま版の切り替え前の値だけが残っているもの）', () => {
+  // 画面の保存前の検証と同じ手順: 表示・編集中の値で案内を求め、保存を止める対象だけを取り出す
+  const blockingOf = (current: Doc, baseline: Doc | undefined, schema: VersionedSchema) =>
+    FindVersionMismatchGuides(current, baseline, schema).filter(IsSaveBlockingVersionMismatch);
+
+  test('2025 年 → 2026 年で新しい欄が空のままなら保存できない。× で消すと保存でき、旧値は残らない', () => {
+    const opened: Doc = { [PROFILE]: { POLE変異: 'なし', p53: '野生型' } };
+    const shown = NormalizeVersionedValues(opened, schema2026);
+    expect(blockingOf(shown, shown, schema2026).map((f) => f.path)).toEqual([
+      [PROFILE, 'POLE変異', 'POLE変異'],
+      [PROFILE, 'p53', 'p53'],
+    ]);
+    // × で両方の旧値を消す（まとまりは空になる）
+    const removed: Doc = { [PROFILE]: { POLE変異: {}, p53: {} } };
+    expect(blockingOf(removed, shown, schema2026)).toEqual([]);
+    const saved = FinalizeVersionedValuesForSave(removed, schema2026);
+    expect(HasVersionMismatchValue(saved, schema2026)).toBe(false);
+    expect(JSON.stringify(saved)).not.toContain('版の切り替え前の値');
+  });
+
+  test('× で消した直後（項目名が残り値が undefined）は残っていないものとみなし、保存データにも項目名を残さない', () => {
+    // 1 つの値の旧値を × で消した直後
+    const single: Doc = {
+      [PROFILE]: { p53: { 'p53（版の切り替え前の値）': undefined, p53検査方法: 'p53-IHC検査（IHC法）' } },
+    };
+    expect(blockingOf(single, single, schema2026)).toEqual([]);
+    expect(FindVersionMismatchGuides(single, single, schema2026)).toEqual([]);
+    expect(Object.keys(profileOf(FinalizeVersionedValuesForSave(single, schema2026)).p53 as Doc)).toEqual([
+      'p53検査方法',
+    ]);
+    // まとまりの旧値の中の欄をすべて × で消した直後（2025 年版の文書）
+    const group: Doc = {
+      [PROFILE]: {
+        'POLE変異（版の切り替え前の値）': { POLE変異: undefined, POLE変異検査方法: undefined },
+      },
+    };
+    expect(blockingOf(group, group, schema2025)).toEqual([]);
+    expect(FinalizeVersionedValuesForSave(group, schema2025)).toEqual({ [PROFILE]: {} });
+    // まとまりの中の欄が 1 つでも残っていれば保存できない
+    const partly: Doc = {
+      [PROFILE]: {
+        'POLE変異（版の切り替え前の値）': { POLE変異: undefined, POLE変異検査方法: 'NGS法' },
+      },
+    };
+    expect(blockingOf(partly, partly, schema2025)).toHaveLength(1);
+  });
+
+  test('新しい欄に値を入れると保存でき、保存時に旧値が取り除かれる（現在の動きのまま）', () => {
+    const shown = NormalizeVersionedValues({ [PROFILE]: { POLE変異: 'なし' } } as Doc, schema2026);
+    const edited: Doc = {
+      [PROFILE]: { POLE変異: { ...(profileOf(shown).POLE変異 as Doc), POLE変異: 'あり' } },
+    };
+    expect(blockingOf(edited, shown, schema2026)).toEqual([]);
+    const saved = FinalizeVersionedValuesForSave(edited, schema2026);
+    expect(profileOf(saved).POLE変異).toEqual({ POLE変異: 'あり' });
+  });
+
+  test('同名の新しい欄が空で検査方法だけを入れた場合は保存できない', () => {
+    const doc: Doc = {
+      [PROFILE]: {
+        POLE変異: { 'POLE変異（版の切り替え前の値）': 'なし', POLE変異検査方法: 'NGS法' },
+      },
+    };
+    expect(blockingOf(doc, doc, schema2026)).toHaveLength(1);
+  });
+
+  test('逆方向（2026 年 → 2025 年）でも、2025 年版の欄が空なら保存できず、入力すれば保存できる', () => {
+    const opened: Doc = {
+      [PROFILE]: { POLE変異: { POLE変異: 'なし', POLE変異検査方法: 'NGS法' } },
+    };
+    const shown = NormalizeVersionedValues(opened, schema2025);
+    expect(blockingOf(shown, shown, schema2025).map((f) => f.path)).toEqual([
+      [PROFILE, 'POLE変異'],
+    ]);
+    const filled: Doc = { [PROFILE]: { ...profileOf(shown), POLE変異: 'なし' } };
+    expect(blockingOf(filled, shown, schema2025)).toEqual([]);
+  });
+
+  test('ver 1.6.0 より前に崩れた症例: 新しい欄が空なら保存できず、新しい欄に値があれば保存できる', () => {
+    const emptyNew: Doc = { [PROFILE]: { p53: { 0: '野', 1: '生', 2: '型' } } };
+    // 開いただけでは値を変えない（置き直しは表示用。DB の値で判定しても同じ結果）
+    const shownEmpty = NormalizeVersionedValues(emptyNew, schema2026);
+    expect(blockingOf(shownEmpty, emptyNew, schema2026)).toHaveLength(1);
+    const filledNew: Doc = { [PROFILE]: { POLE変異: { 0: 'な', 1: 'し', POLE変異: 'あり' } } };
+    const shownFilled = NormalizeVersionedValues(filledNew, schema2026);
+    expect(blockingOf(shownFilled, filledNew, schema2026)).toEqual([]);
+    // 案内（保存を妨げないもの）は出る
+    expect(FindVersionMismatchGuides(shownFilled, filledNew, schema2026)).toHaveLength(1);
+  });
+
+  test('新しい版に無い項目（MMR/MSI）・2023 年版に残る値は保存を止めない（印・案内はこれまでどおり）', () => {
+    const mmr: Doc = { [PROFILE]: { 'MMR/MSI': '不明', POLE変異: { POLE変異: 'あり' } } };
+    expect(blockingOf(mmr, mmr, schema2026)).toEqual([]);
+    const decomposed2023: Doc = { 組織型: 'x', [PROFILE]: { POLE変異: { 0: 'な', 1: 'し' } } };
+    expect(blockingOf(decomposed2023, decomposed2023, schema2023)).toEqual([]);
+    expect(HasVersionMismatchValue(decomposed2023, schema2023)).toBe(true);
+    // 該当する項目が無い版に残る「版の切り替え前の値」も止めない（入力し直す欄が無い）
+    const old2023: Doc = {
+      組織型: 'x',
+      [PROFILE]: { POLE変異: { 'POLE変異（版の切り替え前の値）': 'なし' } },
+    };
+    const guides = FindVersionMismatchGuides(old2023, old2023, schema2023);
+    expect(guides).toHaveLength(1);
+    expect(guides[0].hasCurrentField).toBe(false);
+    expect(blockingOf(old2023, old2023, schema2023)).toEqual([]);
+  });
+
+  test('保存を止めない状態で保存した結果に、新しい欄が空の版の切り替え前の値は残らない（すべての形）', () => {
+    const docs: { doc: Doc; schema: VersionedSchema }[] = [
+      { doc: { [PROFILE]: { POLE変異: { POLE変異: 'なし' } } }, schema: schema2026 },
+      { doc: { [PROFILE]: { 'MMR/MSI': '不明' } }, schema: schema2026 },
+      { doc: { [PROFILE]: { POLE変異: 'なし' } }, schema: schema2026 },
+      { doc: { [PROFILE]: { POLE変異: { 0: 'な', 1: 'し', POLE変異: 'あり' } } }, schema: schema2026 },
+      { doc: { [PROFILE]: { p53: { 0: '野', 1: '生', 2: '型' } } }, schema: schema2026 },
+      { doc: { [PROFILE]: { POLE変異: { POLE変異: 'なし' } } }, schema: schema2025 },
+      { doc: { [PROFILE]: { POLE変異: { 0: 'な', 1: 'し', POLE変異: 'なし' } } }, schema: schema2025 },
+      { doc: { 組織型: 'x', [PROFILE]: { POLE変異: { 0: 'な', 1: 'し' } } }, schema: schema2023 },
+    ];
+    docs.forEach(({ doc, schema }) => {
+      const shown = NormalizeVersionedValues(doc, schema);
+      const canSave = blockingOf(shown, doc, schema).length === 0;
+      const saved = FinalizeVersionedValuesForSave(shown, schema);
+      const remaining = FindVersionMismatchValues(saved, schema).filter(IsSaveBlockingVersionMismatch);
+      if (canSave) {
+        expect(remaining).toEqual([]);
+      } else {
+        // 保存を止める文書は、患者リストでも印が付く
+        expect(HasVersionMismatchValue(doc, schema)).toBe(true);
+      }
+    });
   });
 });

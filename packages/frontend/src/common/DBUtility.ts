@@ -19,7 +19,10 @@ import {
 } from '../store/formDataReducer';
 import { JesgoDocumentSchema } from '../store/schemaDataReducer';
 import apiAccess, { ApiReturnObject, METHOD_TYPE, RESULT } from './ApiAccess';
-import { validateJesgoDocument } from './CaseRegistrationUtility';
+import {
+  AddJesgoError,
+  validateJesgoDocument,
+} from './CaseRegistrationUtility';
 import {
   RegistrationErrors,
   VALIDATE_TYPE,
@@ -138,15 +141,77 @@ const finalizeDocumentForSchemaVersion = (
   doc: jesgoDocumentObjDefine
 ): unknown => {
   const document: unknown = doc.value.document;
-  const schemaInfo = GetSchemaInfo(doc.value.schema_id, doc.value.event_date || null);
-  if (!schemaInfo || document === null || typeof document !== 'object') {
+  const versionSchema = getVersionSchemaForSave(doc, doc.value.event_date);
+  if (!versionSchema) {
     return document;
+  }
+  return FinalizeVersionedValuesForSave(document, versionSchema.resolved);
+};
+
+/**
+ * 保存時に文書の値を仕上げるスキーマの版（文書の日付で決まる版）を求める
+ * @param doc 文書
+ * @param eventDate 文書の日付（保存時に求め直した値）
+ * @returns 版のスキーマ（参照・条件を展開したもの）。スキーマが取れない・文書の値がまとまりでない場合は undefined
+ */
+const getVersionSchemaForSave = (
+  doc: jesgoDocumentObjDefine,
+  eventDate: string
+): { schemaInfo: JesgoDocumentSchema; resolved: JSONSchema7 } | undefined => {
+  const document: unknown = doc.value.document;
+  const schemaInfo = GetSchemaInfo(doc.value.schema_id, eventDate || null);
+  if (!schemaInfo || document === null || typeof document !== 'object') {
+    return undefined;
   }
   const resolved = CustomSchemaWithoutAppend({
     orgSchema: schemaInfo.document_schema,
     formData: document,
   });
-  return FinalizeVersionedValuesForSave(document, resolved);
+  return { schemaInfo, resolved };
+};
+
+/**
+ * 保存時と同じ版で、版の切り替え前の値の案内（保存を止める【要修正】を含む）を作り直す
+ * 入力エラーの検証（validateJesgoDocument）は、画面で保持している文書の日付で版を決める。
+ * 保存処理（SaveChanges）は文書の日付を求め直してから仕上げるため、まだ描画されていない文書などで
+ * 両者の版が食い違うと、新しい欄が空の版の切り替え前の値が検証をすり抜けて保存され得る。
+ * 版が食い違う文書だけ、保存時の版で案内を作り直し、保存の可否を保存時の版で判断する
+ * @param saveData 保存するデータ
+ * @param errors エラー一覧（追記・置き換えする）
+ */
+const applySaveTimeVersionMismatchErrors = (
+  saveData: SaveDataObjDefine,
+  errors: RegistrationErrors[]
+) => {
+  saveData.jesgo_document.forEach((doc) => {
+    const document: unknown = doc.value.document;
+    if (doc.value.deleted || document === null || typeof document !== 'object') {
+      return;
+    }
+    const saveEventDate = getEventDate(doc, document);
+    const versionSchema = getVersionSchemaForSave(doc, saveEventDate);
+    if (!versionSchema) return;
+    const validatedSchemaInfo = GetSchemaInfo(
+      doc.value.schema_id,
+      doc.value.event_date
+    );
+    if (
+      validatedSchemaInfo?.schema_primary_id ===
+      versionSchema.schemaInfo.schema_primary_id
+    ) {
+      // 検証と同じ版（通常はこちら）
+      return;
+    }
+    AddJesgoError(
+      errors,
+      doc.value.document,
+      doc.key,
+      doc.value.schema_id,
+      versionSchema.schemaInfo.document_schema,
+      false,
+      versionSchema.resolved
+    );
+  });
 };
 
 // 症例情報(1患者)読み込み
@@ -711,11 +776,15 @@ export const hasJesgoCaseError = (
 
   // 自動生成部分のvalidation
   const errors: RegistrationErrors[] = validateJesgoDocument(saveData);
+  // 版の切り替え前の値は、保存時と同じ版で判定する
+  applySaveTimeVersionMismatchErrors(saveData, errors);
   // エラー解消も反映させるため、必ずsetする
   setErrors(errors);
   dispatch({ type: 'SET_ERROR', extraErrors: errors });
 
   // 必須チェックのエラーのみの場合は保存できるようにする
+  // 版の切り替え前の値の案内のうち、新しい欄が空のまま旧値だけが残っているもの（VersionMismatchOldValue）は
+  // 入力エラーと同じく保存を止める（保存ボタン・タブ切り替え時の保存・保存してリストに戻るのいずれもここを通る）
   for (let i = 0; i < errors.length; i += 1) {
     const schemaError = errors[i];
     if (

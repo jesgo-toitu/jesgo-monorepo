@@ -27,6 +27,7 @@ export enum VALIDATE_TYPE {
   Other, // その他エラー
   JesgoError, // jesgo:error
   VersionMismatch, // 版の切り替え前の値が残っている旨の案内(保存は妨げない)
+  VersionMismatchOldValue, // 版の切り替え前の値だけが残り新しい欄が空(【要修正】。入力エラーと同じく保存を止める)
 }
 
 export type ValidationItem = {
