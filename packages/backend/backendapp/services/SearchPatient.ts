@@ -1,8 +1,9 @@
 import { DbAccess } from '../logic/DbAccess';
 import { ParsedQs } from 'qs';
 import { ApiReturnObject, RESULT } from '../logic/ApiCommon';
+import { getJesgoErrorStatus } from '../logic/JesgoErrorStatus';
 import { logging, LOGTYPE } from '../logic/Logger';
-import { Const, isAgoYearFromNow, jesgo_tagging } from '../logic/Utility';
+import { Const, jesgo_tagging } from '../logic/Utility';
 import { getItemsAndNames, JSONSchema7 } from './JsonToDatabase';
 import {
   addStatus,
@@ -14,6 +15,7 @@ import {
   getValueFromPath,
   USER_DATA_PROPERTIES,
   HasVersionMismatchValue,
+  isAgoYearFromNow,
 } from '@jesgo/common';
 
 //インターフェース
@@ -304,8 +306,8 @@ export const getPropertyNameFromTag = (
   document: any,
   schema: JSONSchema7
 ): string | null => {
-  logging(LOGTYPE.DEBUG, '呼び出し', 'SearchPatient', 'getPropertyNameFromTag');
-
+  // スキーマの全ノードを再帰でたどり、患者リストの処理では文書ごと・タグごとに呼ばれるため、
+  // 呼び出しのたびにはログを出さない（大量のログが書き込み待ちとしてメモリに溜まり、処理も遅くなるため）
   const schemaItems = getItemsAndNames(schema);
   let retText = null;
   for (let i = 0; i < schemaItems.pNames.length; i++) {
@@ -391,6 +393,21 @@ export const searchPatients = async (
     ORDER BY ca.case_id , sch.schema_id_string;`
   )) as dbRow[];
 
+  // スキーマの文字列（タグの有無の確認用）は、同じスキーマ（最新の版）の行で同じになるため、
+  // 文書の行ごとに作らず、スキーマごとに 1 回だけ作る
+  const schemaStringMap = new Map<number, string>();
+  const getSchemaString = (row: dbRow): string => {
+    if (row.latest_schema_primary_id == null) {
+      return JSON.stringify(row.document_schema);
+    }
+    let schemaString = schemaStringMap.get(row.latest_schema_primary_id);
+    if (schemaString === undefined) {
+      schemaString = JSON.stringify(row.document_schema);
+      schemaStringMap.set(row.latest_schema_primary_id, schemaString);
+    }
+    return schemaString;
+  };
+
   // がん種検索用のリストを取得しておく
   const cancerSearchColumns = (await dbAccess.query(
     "SELECT column_id, column_name FROM jesgo_search_column WHERE column_type = 'cancer_type' ORDER BY column_id"
@@ -431,36 +448,33 @@ export const searchPatients = async (
   // 1回目のループで再発情報が乗っている行を探す
   for (let index = 0; index < dbRows.length; index++) {
     const dbRow: dbRow = dbRows[index];
-    if (
-      JSON.stringify(dbRow.document_schema).includes(
-        jesgo_tagging(Const.JESGO_TAG.RECURRENCE)
-      )
-    ) {
+    if (getSchemaString(dbRow).includes(jesgo_tagging(Const.JESGO_TAG.RECURRENCE))) {
       recurrenceChildDocumentIds = dbRow.child_documents;
       break;
     }
   }
   // 2回目のループでuserData形式へのコンバートを行う
   const userDataList: userData[] = [];
-  const caseIdList: number[] = [];
+  // 症例ID → 一覧の行（症例ごとに 1 行。行の順序は userDataList の順序のまま）
+  const userDataMap = new Map<number, userData>();
+  // エラー情報（jesgo:error）の形を読み取れなかった文書の ID（運用ログ用）
+  const unreadableErrorDocumentIds: number[] = [];
   for (let index = 0; index < dbRows.length; index++) {
     const dbRow: dbRow = dbRows[index];
-    const document = JSON.stringify(dbRow.document);
-    const docSchema = JSON.stringify(dbRow.document_schema);
+    const docSchema = getSchemaString(dbRow);
     const caseId: number = dbRow.case_id;
-    let rowIndex = caseIdList.indexOf(caseId);
+    const existingUserData = userDataMap.get(caseId);
     let userData: userData;
 
     // 腫瘍登録対象チェック: 登録拒否
     if (query.showOnlyTumorRegistry === 'true' && dbRow.decline) continue;
 
     // 該当レコードのcaseIdが既に記録されてるか確認
-    if (rowIndex != -1) {
-      // 存在している場合、userDataListの同じ添え字にアクセス
-      userData = userDataList[rowIndex];
+    if (existingUserData) {
+      // 存在している場合、記録済みの行を使う
+      userData = existingUserData;
     } else {
-      // 存在しない場合は新規に作成、caseIdListにも記録する
-      caseIdList.push(caseId);
+      // 存在しない場合は新規に作成し、記録する
       userData = {
         caseId: caseId,
         patientId: dbRow.his_id,
@@ -486,7 +500,8 @@ export const searchPatients = async (
         fiveYearPrognosis: [],
         status: [],
       };
-      rowIndex = userDataList.push(userData);
+      userDataList.push(userData);
+      userDataMap.set(caseId, userData);
 
       // caseの情報を取得するのは初回のみ
       // 死亡日が設定されている場合死亡ステータスを追加
@@ -710,16 +725,22 @@ export const searchPatients = async (
     }
 
     // エラー有無(ここのみスキーマではなくドキュメントを見る)
-    if (document.includes('jesgo:error')) {
-      const errorProperty = (dbRow.document as any)['jesgo:error'];
-      if (Array.isArray(errorProperty) && errorProperty.filter(item => item != null).length > 0) {
-        if (errorProperty.some(item => (item as string).includes('要確認')))
-          userData.registration.push(STATUS_STRINGS.HAS_WARN);
-        if (errorProperty.some(item => (item as string).includes('要修正'))) {
-          userData.registration.push(STATUS_STRINGS.HAS_ERROR);
-        }
+    // 文書の最上位の jesgo:error を見る（文書全体を文字列にして探すと、文書の数だけ大きな文字列を作るため直接参照する）
+    if (dbRow.document != null && typeof dbRow.document === 'object') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errorProperty: unknown = (dbRow.document as any)['jesgo:error'];
+      // 想定外の形の値があっても一覧全体を止めず、読み取れない値は「エラーあり」とする
+      const errorStatus = getJesgoErrorStatus(errorProperty);
+      if (errorStatus.hasWarn) {
+        userData.registration.push(STATUS_STRINGS.HAS_WARN);
       }
-    } 
+      if (errorStatus.hasError) {
+        userData.registration.push(STATUS_STRINGS.HAS_ERROR);
+      }
+      if (errorStatus.hasUnreadableValue) {
+        unreadableErrorDocumentIds.push(dbRow.document_id);
+      }
+    }
 
     // 版と形の合わない値の有無
     // スキーマの版の切り替えで、版と形の合わない値（切り替え前の値・1 文字ずつに分解された値）が
@@ -809,6 +830,22 @@ export const searchPatients = async (
     if (dbRow.event_date) {
       userData.eventDate.push(dbRow.event_date);
     }
+  }
+
+  // エラー情報を読み取れなかった文書を運用ログに残す（文書の ID のみ。患者 ID・氏名・エラー情報の中身は出さない）
+  if (unreadableErrorDocumentIds.length > 0) {
+    const maxLoggedIds = 50;
+    const loggedIds = unreadableErrorDocumentIds.slice(0, maxLoggedIds).join(',');
+    const rest =
+      unreadableErrorDocumentIds.length > maxLoggedIds
+        ? ` ほか ${unreadableErrorDocumentIds.length - maxLoggedIds} 件`
+        : '';
+    logging(
+      LOGTYPE.WARN,
+      `エラー情報（jesgo:error）の形を読み取れない文書が ${unreadableErrorDocumentIds.length} 件あったため、「エラーあり」として扱いました。document_id=${loggedIds}${rest}`,
+      'SearchPatient',
+      'searchPatients'
+    );
   }
 
   // がん種結合
@@ -1122,6 +1159,23 @@ export const searchPatients = async (
 
   const presetId = query.presetId ? parseInt(query.presetId as string) : 0;
   const filteredDocuments = new Map<string, number[]>();
+  // 症例ID → その症例の文書の行（取得した順）。症例ごとに全行を探し直さないよう、初めて使うときに 1 回だけ作る
+  let patientDbRowsMap: Map<number, dbRow[]> | undefined;
+  const getPatientDbRows = (caseId: number): dbRow[] => {
+    if (!patientDbRowsMap) {
+      const map = new Map<number, dbRow[]>();
+      dbRows.forEach((row) => {
+        const rows = map.get(row.case_id);
+        if (rows) {
+          rows.push(row);
+        } else {
+          map.set(row.case_id, [row]);
+        }
+      });
+      patientDbRowsMap = map;
+    }
+    return patientDbRowsMap.get(caseId) ?? [];
+  };
   const addFilteredDocument = (field_name: string, document_id: number) => {
     const documentIds = filteredDocuments.get(field_name) ?? filteredDocuments.set(field_name, []).get(field_name)!;
     documentIds.push(document_id);
@@ -1219,21 +1273,10 @@ export const searchPatients = async (
             if (propertyName === USER_DATA_PROPERTIES.STATUS && Array.isArray(fixedFieldValue)) {
               fixedFieldValue = fixedFieldValue.join(',');
             }
-            logging(
-              LOGTYPE.DEBUG,
-              `固定項目値取得: field_name=${field_name}, propertyName=${propertyName}, fixedFieldValue=${fixedFieldValue}, fixedFieldValueType=${typeof fixedFieldValue}, caseId=${userData.caseId}, patientId=${userData.patientId}`,
-              'SearchPatient-searchPatients'
-            );
-          } else {
-            logging(
-              LOGTYPE.DEBUG,
-              `固定項目ではない: field_name=${field_name}`,
-              'SearchPatient-searchPatients'
-            );
           }
 
           // 該当患者のドキュメントを取得（カスタム項目の場合のみ使用）
-          const patientDbRows = dbRows.filter(row => row.case_id === userData.caseId);
+          const patientDbRows = getPatientDbRows(userData.caseId);
 
           // field_pathまたはfield_nameを使用して値を取得
           const getFieldValue = (dbRow: dbRow): any => {
@@ -1297,43 +1340,16 @@ export const searchPatients = async (
             if (isFixedField) {
               // 固定項目の場合はuserDataから直接取得した値を使用
               const fieldValueStr = fixedFieldValue != null ? String(fixedFieldValue) : '';
-              logging(
-                LOGTYPE.DEBUG,
-                `固定項目フィルタリング: field_name=${field_name}, propertyName=${fixedFieldMapping[field_name]}, fixedFieldValue=${fixedFieldValue}, fieldValueStr=${fieldValueStr}, searchValueStr=${searchValueStr}, caseId=${userData.caseId}, isRegex=${regexPattern !== null}`,
-                'SearchPatient-searchPatients'
-              );
               
               if (regexPattern) {
                 // 正規表現としてマッチング
                 if (tryRegexMatch(fieldValueStr, regexPattern.pattern, regexPattern.flags)) {
                   found = true;
-                  logging(
-                    LOGTYPE.DEBUG,
-                    `固定項目フィルタリング（正規表現）: 一致しました - field_name=${field_name}, pattern=${regexPattern.pattern}, caseId=${userData.caseId}`,
-                    'SearchPatient-searchPatients'
-                  );
-                } else {
-                  logging(
-                    LOGTYPE.DEBUG,
-                    `固定項目フィルタリング（正規表現）: 一致しませんでした - field_name=${field_name}, pattern=${regexPattern.pattern}, caseId=${userData.caseId}`,
-                    'SearchPatient-searchPatients'
-                  );
                 }
               } else {
                 // 通常の部分一致検索
                 if (fieldValueStr.includes(searchValueStr)) {
                   found = true;
-                  logging(
-                    LOGTYPE.DEBUG,
-                    `固定項目フィルタリング: 一致しました - field_name=${field_name}, caseId=${userData.caseId}`,
-                    'SearchPatient-searchPatients'
-                  );
-                } else {
-                  logging(
-                    LOGTYPE.DEBUG,
-                    `固定項目フィルタリング: 一致しませんでした - field_name=${field_name}, caseId=${userData.caseId}`,
-                    'SearchPatient-searchPatients'
-                  );
                 }
               }
             } else {
@@ -1342,7 +1358,6 @@ export const searchPatients = async (
                 if (dbRow.document && typeof dbRow.document === 'object') {
                   const checkFieldValue = () => {
                     const fieldValue = getFieldValue(dbRow);
-                    console.log(`${dbRow.schemaidstring} ${fieldValue}`);
                     if (fieldValue != null) {
                       const fieldValueStr = String(fieldValue);
                       if (regexPattern) {
@@ -1429,17 +1444,6 @@ export const searchPatients = async (
                 // 正規表現としてマッチング
                 if (tryRegexMatch(fieldValueStr, regexPattern.pattern, regexPattern.flags)) {
                   found = true;
-                  logging(
-                    LOGTYPE.DEBUG,
-                    `固定項目フィルタリング（数値・正規表現）: 一致しました - field_name=${field_name}, pattern=${regexPattern.pattern}, caseId=${userData.caseId}`,
-                    'SearchPatient-searchPatients'
-                  );
-                } else {
-                  logging(
-                    LOGTYPE.DEBUG,
-                    `固定項目フィルタリング（数値・正規表現）: 一致しませんでした - field_name=${field_name}, pattern=${regexPattern.pattern}, caseId=${userData.caseId}`,
-                    'SearchPatient-searchPatients'
-                  );
                 }
               } else {
                 // 通常の数値比較または文字列比較
@@ -1451,33 +1455,11 @@ export const searchPatients = async (
                   // 両方とも数値として解釈できる場合は数値比較
                   if (fieldValueNum === searchValueNum) {
                     found = true;
-                    logging(
-                      LOGTYPE.DEBUG,
-                      `固定項目フィルタリング（数値）: 一致しました - field_name=${field_name}, fieldValue=${fieldValueNum}, searchValue=${searchValueNum}, caseId=${userData.caseId}`,
-                      'SearchPatient-searchPatients'
-                    );
-                  } else {
-                    logging(
-                      LOGTYPE.DEBUG,
-                      `固定項目フィルタリング（数値）: 一致しませんでした - field_name=${field_name}, fieldValue=${fieldValueNum}, searchValue=${searchValueNum}, caseId=${userData.caseId}`,
-                      'SearchPatient-searchPatients'
-                    );
                   }
                 } else {
                   // 数値として解釈できない場合は文字列比較
                   if (fieldValueStr.includes(searchValueStr)) {
                     found = true;
-                    logging(
-                      LOGTYPE.DEBUG,
-                      `固定項目フィルタリング（数値・文字列）: 一致しました - field_name=${field_name}, fieldValue=${fieldValueStr}, searchValue=${searchValueStr}, caseId=${userData.caseId}`,
-                      'SearchPatient-searchPatients'
-                    );
-                  } else {
-                    logging(
-                      LOGTYPE.DEBUG,
-                      `固定項目フィルタリング（数値・文字列）: 一致しませんでした - field_name=${field_name}, fieldValue=${fieldValueStr}, searchValue=${searchValueStr}, caseId=${userData.caseId}`,
-                      'SearchPatient-searchPatients'
-                    );
                   }
                 }
               }
@@ -1626,7 +1608,7 @@ export const searchPatients = async (
                           break;
                         }
                         default: {
-                          const docSchema = JSON.stringify(dbRow.document_schema);
+                          const docSchema = getSchemaString(dbRow);
                           switch (selectedStatusIcon) {
                             case STATUS_STRINGS.RECURRENCE: {
                               hasMatchingStatus = docSchema.includes(jesgo_tagging(Const.JESGO_TAG.RECURRENCE));
@@ -1738,18 +1720,7 @@ export const searchPatients = async (
           }
 
           if (shouldRemove) {
-            logging(
-              LOGTYPE.DEBUG,
-              `患者を削除: field_name=${field_name}, caseId=${userData.caseId}, patientId=${userData.patientId}`,
-              'SearchPatient-searchPatients'
-            );
             userDataList.splice(index, 1);
-          } else {
-            logging(
-              LOGTYPE.DEBUG,
-              `患者を保持: field_name=${field_name}, caseId=${userData.caseId}, patientId=${userData.patientId}`,
-              'SearchPatient-searchPatients'
-            );
           }
         }
       }

@@ -10,6 +10,8 @@ import {
   executePlugin,
   executePluginWithTimeout,
   jesgoPluginColumns,
+  PrepareListTargetFunction,
+  runPatientListOutputPlugin,
 } from '../../common/Plugin';
 import { jesgoCaseDefine } from '../../store/formDataReducer';
 import PluginOverwriteConfirm, {
@@ -29,9 +31,17 @@ const PluginButton = (props: {
   getTargetFunction: () => jesgoCaseDefine[];
   setIsLoading: (value: React.SetStateAction<boolean>) => void;
   setReload: (value: React.SetStateAction<reloadState>) => void;
+  // 患者リストから実行する出力系プラグインの対象症例を決める関数（患者リスト以外は undefined）
+  prepareListTarget: PrepareListTargetFunction | undefined;
 }) => {
-  const { pageType, pluginList, getTargetFunction, setIsLoading, setReload } =
-    props;
+  const {
+    pageType,
+    pluginList,
+    getTargetFunction,
+    setIsLoading,
+    setReload,
+    prepareListTarget,
+  } = props;
   const [targetPlugins, setTargetPlugins] = useState<jesgoPluginColumns[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const [overwriteDialogPlop, setOverwriteDialogPlop] = useState<
@@ -76,6 +86,23 @@ const PluginButton = (props: {
       setChildPlugins(pluginList.filter((p) => p.plugin_id && p.plugin_group_id === plugin.plugin_group_id));
       setPluginTitle(plugin.plugin_name);
       setShow(true);
+      return;
+    }
+
+    // 患者リストから実行する出力系プラグインは、一覧の全件を対象にする
+    // （一括更新系・新規登録系の対象は変えない）
+    if (
+      pageType === PAGE_TYPE.PATIENT_LIST &&
+      !plugin.update_db &&
+      prepareListTarget
+    ) {
+      await runPatientListOutputPlugin(
+        plugin,
+        prepareListTarget,
+        setIsLoading,
+        setReload,
+        setOverwriteDialogPlop
+      );
       return;
     }
 
@@ -152,6 +179,7 @@ const PluginButton = (props: {
         getTargetFunction={getTargetFunction}
         setIsLoading={setIsLoading}
         setReload={setReload}
+        prepareListTarget={prepareListTarget}
       />
     </>
   );
@@ -162,14 +190,22 @@ export const PatientListPluginButton = (props: {
   getTargetFunction: () => jesgoCaseDefine[];
   setIsLoading: (value: React.SetStateAction<boolean>) => void;
   setReload: (value: React.SetStateAction<reloadState>) => void;
+  prepareListTarget: PrepareListTargetFunction;
 }) => {
-  const { pluginList, getTargetFunction, setIsLoading, setReload } = props;
+  const {
+    pluginList,
+    getTargetFunction,
+    setIsLoading,
+    setReload,
+    prepareListTarget,
+  } = props;
   return PluginButton({
     pageType: PAGE_TYPE.PATIENT_LIST,
     pluginList,
     getTargetFunction,
     setIsLoading,
     setReload,
+    prepareListTarget,
   });
 };
 
@@ -186,5 +222,6 @@ export const TargetPatientPluginButton = (props: {
     getTargetFunction,
     setIsLoading,
     setReload,
+    prepareListTarget: undefined,
   });
 };
