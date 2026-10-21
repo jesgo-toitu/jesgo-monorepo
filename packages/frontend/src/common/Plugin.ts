@@ -945,12 +945,10 @@ export const executePluginWithTimeout = async (
       executeFn(),
     ]);
     if (!plugin.update_db) {
-      // デバッグ: プラグイン実行結果をログ出力
+      // デバッグ: プラグイン実行結果の種類をログ出力（中身は患者情報を含み得るため出さない）
       console.log('[executePluginWithTimeout] プラグイン実行結果:', {
         type: typeof res,
         isArray: Array.isArray(res),
-        value: res,
-        stringified: typeof res === 'string' ? res : JSON.stringify(res),
       });
       // eslint-disable-next-line
       OpenOutputView(window, res);

@@ -7,17 +7,22 @@ import React, { Dispatch } from 'react';
 import lodash from 'lodash';
 import {
   CustomSchema,
+  CustomSchemaWithoutAppend,
   getJesgoSchemaPropValue,
   GetSchemaInfo,
 } from '../components/CaseRegistration/SchemaUtility';
 import {
+  getLoginUserId,
   jesgoCaseDefine,
   jesgoDocumentObjDefine,
   SaveDataObjDefine,
 } from '../store/formDataReducer';
 import { JesgoDocumentSchema } from '../store/schemaDataReducer';
 import apiAccess, { ApiReturnObject, METHOD_TYPE, RESULT } from './ApiAccess';
-import { validateJesgoDocument } from './CaseRegistrationUtility';
+import {
+  AddJesgoError,
+  validateJesgoDocument,
+} from './CaseRegistrationUtility';
 import {
   RegistrationErrors,
   VALIDATE_TYPE,
@@ -27,6 +32,7 @@ import { formatDate, formatDateStr } from './CommonUtility';
 import store from '../store';
 import { JSONSchema7 } from 'json-schema';
 import { GetModule, jesgoPluginColumns } from './Plugin';
+import { FinalizeVersionedValuesForSave } from '@jesgo/common';
 import staffData from '../components/Staff/StaffData';
 
 export interface responseResult {
@@ -122,6 +128,90 @@ const convertNullToUndefindForArray = (arrayObj: any[]) => {
       convertNullToUndefind(arrayItem as object);
     }
   }
+};
+
+/**
+ * 保存する文書の値を、文書の日付（event_date）で決まるスキーマの版に合わせて仕上げる
+ * - 形の合わない値・分解された値を「切り替え前の値」の形に直す
+ * - 同じ項目の新しい欄に値が入った旧値を取り除く
+ * @param doc 文書
+ * @returns 仕上げた値。変更が無ければ元の値（同じ参照）
+ */
+const finalizeDocumentForSchemaVersion = (
+  doc: jesgoDocumentObjDefine
+): unknown => {
+  const document: unknown = doc.value.document;
+  const versionSchema = getVersionSchemaForSave(doc, doc.value.event_date);
+  if (!versionSchema) {
+    return document;
+  }
+  return FinalizeVersionedValuesForSave(document, versionSchema.resolved);
+};
+
+/**
+ * 保存時に文書の値を仕上げるスキーマの版（文書の日付で決まる版）を求める
+ * @param doc 文書
+ * @param eventDate 文書の日付（保存時に求め直した値）
+ * @returns 版のスキーマ（参照・条件を展開したもの）。スキーマが取れない・文書の値がまとまりでない場合は undefined
+ */
+const getVersionSchemaForSave = (
+  doc: jesgoDocumentObjDefine,
+  eventDate: string
+): { schemaInfo: JesgoDocumentSchema; resolved: JSONSchema7 } | undefined => {
+  const document: unknown = doc.value.document;
+  const schemaInfo = GetSchemaInfo(doc.value.schema_id, eventDate || null);
+  if (!schemaInfo || document === null || typeof document !== 'object') {
+    return undefined;
+  }
+  const resolved = CustomSchemaWithoutAppend({
+    orgSchema: schemaInfo.document_schema,
+    formData: document,
+  });
+  return { schemaInfo, resolved };
+};
+
+/**
+ * 保存時と同じ版で、切り替え前の値の案内（保存を止める【要修正】を含む）を作り直す
+ * 入力エラーの検証（validateJesgoDocument）は、画面で保持している文書の日付で版を決める。
+ * 保存処理（SaveChanges）は文書の日付を求め直してから仕上げるため、まだ描画されていない文書などで
+ * 両者の版が食い違うと、新しい欄が空の切り替え前の値が検証をすり抜けて保存され得る。
+ * 版が食い違う文書だけ、保存時の版で案内を作り直し、保存の可否を保存時の版で判断する
+ * @param saveData 保存するデータ
+ * @param errors エラー一覧（追記・置き換えする）
+ */
+const applySaveTimeVersionMismatchErrors = (
+  saveData: SaveDataObjDefine,
+  errors: RegistrationErrors[]
+) => {
+  saveData.jesgo_document.forEach((doc) => {
+    const document: unknown = doc.value.document;
+    if (doc.value.deleted || document === null || typeof document !== 'object') {
+      return;
+    }
+    const saveEventDate = getEventDate(doc, document);
+    const versionSchema = getVersionSchemaForSave(doc, saveEventDate);
+    if (!versionSchema) return;
+    const validatedSchemaInfo = GetSchemaInfo(
+      doc.value.schema_id,
+      doc.value.event_date
+    );
+    if (
+      validatedSchemaInfo?.schema_primary_id ===
+      versionSchema.schemaInfo.schema_primary_id
+    ) {
+      // 検証と同じ版（通常はこちら）
+      return;
+    }
+    AddJesgoError(
+      errors,
+      doc.value.document,
+      doc.key,
+      doc.value.schema_id,
+      versionSchema.schemaInfo.document_schema,
+      false,
+      versionSchema.resolved
+    );
+  });
 };
 
 // 症例情報(1患者)読み込み
@@ -511,6 +601,11 @@ const SaveChanges = async (
 
   const copySaveData = lodash.cloneDeep(saveData);
 
+  // 開いたときに版と形の合わない値を置き直した文書（DB の内容と異なる）のID
+  const versionAlignedDocumentIds =
+    store.getState().formDataReducer.versionAlignedDocumentIds;
+  const updateDate = new Date().toLocaleString('ja-JP');
+
   // jesgo_document更新
   let deathDate = '';
   // 更新用関数定義
@@ -523,6 +618,23 @@ const SaveChanges = async (
         jesgoDoc,
         jesgoDoc.value.document
       );
+
+      // 切り替え前の値の仕上げ: 同じ項目の新しい欄に値が入った旧値を取り除き、
+      // 形の合わない値・分解された値を旧値の形に直してから保存する
+      const beforeFinalize: unknown = jesgoDoc.value.document;
+      // eslint-disable-next-line no-param-reassign
+      jesgoDoc.value.document = finalizeDocumentForSchemaVersion(jesgoDoc);
+      // 仕上げ・開いたときの置き直しで文書の内容が DB と変わる場合は、値の入力時・スキーマの切り替え時と同じく
+      // 文書の最終更新日時と更新者を更新する（症例の最終更新日時だけが変わり、文書の更新が検知できない状態にしない）
+      if (
+        jesgoDoc.value.document !== beforeFinalize ||
+        versionAlignedDocumentIds.includes(jesgoDoc.key)
+      ) {
+        // eslint-disable-next-line no-param-reassign
+        jesgoDoc.value.last_updated = updateDate;
+        // eslint-disable-next-line no-param-reassign
+        jesgoDoc.value.registrant = getLoginUserId();
+      }
 
       // 死亡日時は最初に見つかったものを取得
       if (!deathDate) {
@@ -664,11 +776,15 @@ export const hasJesgoCaseError = (
 
   // 自動生成部分のvalidation
   const errors: RegistrationErrors[] = validateJesgoDocument(saveData);
+  // 切り替え前の値は、保存時と同じ版で判定する
+  applySaveTimeVersionMismatchErrors(saveData, errors);
   // エラー解消も反映させるため、必ずsetする
   setErrors(errors);
   dispatch({ type: 'SET_ERROR', extraErrors: errors });
 
   // 必須チェックのエラーのみの場合は保存できるようにする
+  // 切り替え前の値の案内のうち、新しい欄が空のまま旧値だけが残っているもの（VersionMismatchOldValue）は
+  // 入力エラーと同じく保存を止める（保存ボタン・タブ切り替え時の保存・保存してリストに戻るのいずれもここを通る）
   for (let i = 0; i < errors.length; i += 1) {
     const schemaError = errors[i];
     if (
@@ -676,6 +792,7 @@ export const hasJesgoCaseError = (
         (p) =>
           p.validateType !== VALIDATE_TYPE.Message &&
           p.validateType !== VALIDATE_TYPE.JesgoError &&
+          p.validateType !== VALIDATE_TYPE.VersionMismatch &&
           p.validateType !== VALIDATE_TYPE.Required
       ).length > 0
     ) {

@@ -13,6 +13,7 @@ import {
   SEPARATORS,
   getValueFromPath,
   USER_DATA_PROPERTIES,
+  HasVersionMismatchValue,
 } from '@jesgo/common';
 
 //インターフェース
@@ -33,6 +34,8 @@ export interface dbRow {
   registration: string;
   decline: boolean;
   event_date: Date | null;
+  schema_primary_id: number | null;
+  latest_schema_primary_id: number | null;
 }
 
 export interface searchColumns {
@@ -381,7 +384,8 @@ export const searchPatients = async (
     to_char(ca.last_updated, 'yyyy/mm/dd') as last_updated, 
     doc.document as document,  document_schema, 
     doc.child_documents, doc.document_id as document_id, ca.case_id as case_id, doc.deleted as deleted,  
-    doc.event_date
+    doc.event_date, 
+    doc.schema_primary_id as schema_primary_id, sch.schema_primary_id as latest_schema_primary_id
     FROM jesgo_document doc JOIN view_latest_schema sch ON doc.schema_id = sch.schema_id RIGHT OUTER JOIN jesgo_case ca ON ca.case_id = doc.case_id
     WHERE ca.deleted = false 
     ORDER BY ca.case_id , sch.schema_id_string;`
@@ -391,6 +395,32 @@ export const searchPatients = async (
   const cancerSearchColumns = (await dbAccess.query(
     "SELECT column_id, column_name FROM jesgo_search_column WHERE column_type = 'cancer_type' ORDER BY column_id"
   )) as searchColumns[];
+
+  // 文書の版のスキーマ（最新でない版のもの）を取得しておく（版と形の合わない値の判定用）
+  // 最新の版は各行の document_schema をそのまま使う
+  const versionSchemaMap = new Map<number, JSONSchema7>();
+  const olderSchemaPrimaryIds = Array.from(
+    new Set(
+      dbRows
+        .filter(
+          (row) =>
+            row.document_id != null &&
+            !row.deleted &&
+            row.schema_primary_id != null &&
+            row.schema_primary_id !== row.latest_schema_primary_id
+        )
+        .map((row) => row.schema_primary_id as number)
+    )
+  );
+  if (olderSchemaPrimaryIds.length > 0) {
+    const versionSchemaRows = (await dbAccess.query(
+      'SELECT schema_primary_id, document_schema FROM jesgo_document_schema WHERE schema_primary_id = ANY($1)',
+      [olderSchemaPrimaryIds]
+    )) as { schema_primary_id: number; document_schema: JSONSchema7 }[];
+    versionSchemaRows.forEach((row) =>
+      versionSchemaMap.set(row.schema_primary_id, row.document_schema)
+    );
+  }
 
   await dbAccess.end();
 
@@ -690,6 +720,22 @@ export const searchPatients = async (
         }
       }
     } 
+
+    // 版と形の合わない値の有無
+    // スキーマの版の切り替えで、版と形の合わない値（切り替え前の値・1 文字ずつに分解された値）が
+    // 文書に残っている症例は、利用者が開いて新しい欄に入力し直す必要があるため「エラーあり」とする。
+    // 文書は読むだけで変更しない
+    if (dbRow.document != null && typeof dbRow.document === 'object') {
+      const versionSchema =
+        dbRow.schema_primary_id == null
+          ? undefined
+          : dbRow.schema_primary_id === dbRow.latest_schema_primary_id
+          ? dbRow.document_schema
+          : versionSchemaMap.get(dbRow.schema_primary_id);
+      if (HasVersionMismatchValue(dbRow.document, versionSchema)) {
+        userData.registration.push(STATUS_STRINGS.HAS_ERROR);
+      }
+    }
 
     // 腫瘍登録番号登録有無
     if (docSchema.includes(jesgo_tagging(Const.JESGO_TAG.REGISTRABILITY))) {

@@ -10,6 +10,10 @@ import 'prismjs/plugins/line-numbers/prism-line-numbers.min';
 import 'prismjs/themes/prism-tomorrow.min.css';
 import CsvTable from './CsvTable';
 import { toShiftJIS } from '../../common/CommonUtility';
+import {
+  isOutputViewDataMessage,
+  OUTPUT_VIEW_READY,
+} from '../../common/OutputViewMessage';
 
 /**
  * データ出力用View
@@ -31,14 +35,111 @@ const OutputView = () => {
   const [codeType, setCodeType] = useState<string>(CODE_TYPES.NONE);
 
   const readyNotificate = () => {
-    // デバッグ: output_readyを送信
     console.log('[OutputView] output_readyを送信します');
+    // 開いた画面（呼び出し元）にだけ、同じオリジンを指定して送る
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-    window.opener?.postMessage('output_ready', window.origin);
+    window.opener?.postMessage(OUTPUT_VIEW_READY, window.location.origin);
+  };
+
+  /**
+   * 受け取ったデータを表示する
+   * データの形は OutputViewMessage.ts の OutputViewDataMessage の payload を参照
+   * @param data 表示するデータ
+   */
+  const showData = (data: any) => {
+    setCodeType(CODE_TYPES.NONE);
+    if (!data) {
+      console.warn('[OutputView] 表示するデータがありません');
+      return;
+    }
+    // eslint-disable-next-line no-prototype-builtins
+    if ((data as object)?.hasOwnProperty('viewerType')) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (data.viewerType === CODE_TYPES.LOG) {
+        console.log('[OutputView] LOG形式として処理');
+        setHeader('ドキュメント上書き結果');
+        setCodeType(CODE_TYPES.CSV);
+        // eslint-disable-next-line
+        setResultTable(data.csvData as any[]);
+      }
+    }
+    // eslint-disable-next-line no-prototype-builtins
+    else if ((data as object)?.hasOwnProperty('jsonData')) {
+      // jsonDataプロパティがある場合（空配列や空オブジェクトも含む）
+      console.log('[OutputView] jsonDataプロパティあり - JSON形式として処理');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const jsonstr = JSON.stringify(data.jsonData, null, 2);
+      setCodeType(CODE_TYPES.JSON);
+      setResultStr(jsonstr);
+    } else if (typeof data === 'string') {
+      // 文字列の場合、JSON文字列の可能性をチェック
+      try {
+        const parsed = JSON.parse(data) as unknown;
+        // パース成功した場合はJSONとして表示
+        console.log('[OutputView] JSON文字列をパースしてJSON形式として処理');
+        const jsonstr = JSON.stringify(parsed, null, 2);
+        setCodeType(CODE_TYPES.JSON);
+        setResultStr(jsonstr);
+      } catch {
+        // JSONでない場合は文字列として表示
+        console.log('[OutputView] 文字列として処理');
+        setCodeType(CODE_TYPES.JAVA_SCRIPT);
+        setResultStr(data);
+      }
+    } else if (Array.isArray(data)) {
+      // 配列の場合
+      if (data.length > 0 && Array.isArray(data[0])) {
+        // 2次元配列（CSV形式）
+        console.log('[OutputView] 2次元配列 - CSV形式として処理');
+        setCodeType(CODE_TYPES.CSV);
+        setResultTable(data);
+      } else {
+        // 1次元配列（空配列も含む）はJSON形式として表示
+        console.log('[OutputView] 1次元配列 - JSON形式として処理');
+        const jsonstr = JSON.stringify(data, null, 2);
+        setCodeType(CODE_TYPES.JSON);
+        setResultStr(jsonstr);
+      }
+    } else if (typeof data === 'object' && data !== null) {
+      // オブジェクトの場合（空オブジェクトも含む）
+      console.log('[OutputView] オブジェクト - JSON形式として処理');
+      const jsonstr = JSON.stringify(data, null, 2);
+      setCodeType(CODE_TYPES.JSON);
+      setResultStr(jsonstr);
+    } else {
+      // データの中身（患者情報を含み得る）はログに出さない
+      console.warn('[OutputView] データが処理されませんでした:', typeof data);
+    }
   };
 
   // メッセージ受信準備が完了したら呼び元に通知する
   useEffect(() => {
+    const receiveMessage = (e: MessageEvent) => {
+      // 開いた画面（呼び出し元）から、決めた形で届いたデータだけを受け付ける。
+      // 同じオリジンでも、拡張機能（Redux DevTools など）が送る message などは無視し、受け取りを続ける
+      if (
+        window.opener == null ||
+        e.source !== window.opener ||
+        e.origin !== window.location.origin ||
+        !isOutputViewDataMessage(e.data)
+      ) {
+        return;
+      }
+
+      // データの中身（患者情報を含み得る）はログに出さない
+      const { payload } = e.data;
+      console.log('[OutputView] データを受信しました:', {
+        type: typeof payload,
+        isArray: Array.isArray(payload),
+      });
+      showData(payload);
+
+      window.removeEventListener('message', receiveMessage);
+    };
+
+    // データ受信時の処理（準備完了の通知より先に登録する）
+    window.addEventListener('message', receiveMessage);
+
     // DOMContentLoadedイベントではなく、useEffect内で直接実行
     // これにより、コンポーネントがマウントされた後に確実に送信される
     if (document.readyState === 'loading') {
@@ -47,92 +148,6 @@ const OutputView = () => {
       // 既にDOMContentLoadedが発火している場合は即座に送信
       readyNotificate();
     }
-
-    const receiveMessage = (e: MessageEvent) => {
-      // デバッグ: OutputViewで受信したデータをログ出力
-      const hasViewerType = (e.data as object)?.hasOwnProperty?.('viewerType') ?? false;
-      const hasJsonData = (e.data as object)?.hasOwnProperty?.('jsonData') ?? false;
-      console.log('[OutputView] 受信したデータ:', {
-        type: typeof e.data,
-        isArray: Array.isArray(e.data),
-        hasViewerType,
-        hasJsonData,
-        value: e.data,
-        stringified: typeof e.data === 'string' ? e.data : JSON.stringify(e.data),
-      });
-
-      setCodeType(CODE_TYPES.NONE);
-      if (e.origin === window.location.origin && e.data) {
-        // eslint-disable-next-line no-prototype-builtins
-        if ((e.data as object)?.hasOwnProperty('viewerType')) {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          if (e.data.viewerType === CODE_TYPES.LOG) {
-            console.log('[OutputView] LOG形式として処理');
-            setHeader('ドキュメント上書き結果');
-            setCodeType(CODE_TYPES.CSV);
-            // eslint-disable-next-line
-            setResultTable(e.data.csvData as any[]);
-          }
-        }
-        // eslint-disable-next-line no-prototype-builtins
-        else if ((e.data as object)?.hasOwnProperty('jsonData')) {
-          // jsonDataプロパティがある場合（空配列や空オブジェクトも含む）
-          console.log('[OutputView] jsonDataプロパティあり - JSON形式として処理');
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-          const jsonstr = JSON.stringify(e.data.jsonData, null, 2);
-          setCodeType(CODE_TYPES.JSON);
-          setResultStr(jsonstr);
-        } else if (typeof e.data === 'string') {
-          // 文字列の場合、JSON文字列の可能性をチェック
-          try {
-            const parsed = JSON.parse(e.data);
-            // パース成功した場合はJSONとして表示
-            console.log('[OutputView] JSON文字列をパースしてJSON形式として処理');
-            const jsonstr = JSON.stringify(parsed, null, 2);
-            setCodeType(CODE_TYPES.JSON);
-            setResultStr(jsonstr);
-          } catch {
-            // JSONでない場合は文字列として表示
-            console.log('[OutputView] 文字列として処理');
-            setCodeType(CODE_TYPES.JAVA_SCRIPT);
-            setResultStr(e.data);
-          }
-        } else if (Array.isArray(e.data)) {
-          // 配列の場合
-          if (e.data.length > 0 && Array.isArray(e.data[0])) {
-            // 2次元配列（CSV形式）
-            console.log('[OutputView] 2次元配列 - CSV形式として処理');
-            setCodeType(CODE_TYPES.CSV);
-            setResultTable(e.data);
-          } else {
-            // 1次元配列（空配列も含む）はJSON形式として表示
-            console.log('[OutputView] 1次元配列 - JSON形式として処理');
-            const jsonstr = JSON.stringify(e.data, null, 2);
-            setCodeType(CODE_TYPES.JSON);
-            setResultStr(jsonstr);
-          }
-        } else if (typeof e.data === 'object' && e.data !== null) {
-          // オブジェクトの場合（空オブジェクトも含む）
-          console.log('[OutputView] オブジェクト - JSON形式として処理');
-          const jsonstr = JSON.stringify(e.data, null, 2);
-          setCodeType(CODE_TYPES.JSON);
-          setResultStr(jsonstr);
-        } else {
-          console.warn('[OutputView] データが処理されませんでした:', e.data);
-        }
-      } else {
-        console.warn('[OutputView] データが無いか、originが一致しません:', {
-          origin: e.origin,
-          windowOrigin: window.location.origin,
-          data: e.data,
-        });
-      }
-
-      window.removeEventListener('message', receiveMessage);
-    };
-
-    // データ受信時の処理
-    window.addEventListener('message', receiveMessage);
   }, []);
 
   useEffect(() => {
