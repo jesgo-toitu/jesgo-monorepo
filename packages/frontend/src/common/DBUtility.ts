@@ -880,7 +880,8 @@ export const UploadSchemaFile = async (
  * @returns
  */
 export const GetPackagedDocument = async (
-  jesgoCaseList: jesgoCaseDefine[],
+  // サーバは症例の番号（case_id）だけを使う
+  jesgoCaseList: Pick<jesgoCaseDefine, 'case_id'>[],
   schema_ids?: number[],
   document_id?: number,
   filter_query?: string,
