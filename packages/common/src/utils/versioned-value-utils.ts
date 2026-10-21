@@ -8,7 +8,7 @@
  * - ロジカルチェック・腫瘍登録の書き出しが、形の合わない値を「入力済み」とみなす
  * といった問題が起きる。
  *
- * ここでは、形の合わない値を「版の切り替え前の値」として、読み取り専用で見える形に置き直す。
+ * ここでは、形の合わない値を「切り替え前の値」として、読み取り専用で見える形に置き直す。
  * - 値の意味は変えない。新しい欄へ自動で移さない（新しい欄は空欄のまま）
  * - 旧値は × で消せる（スキーマに無い項目と同じ既存の扱い）
  * - 同じ項目の新しい欄に値を入れて保存したときは、その項目の旧値を取り除く
@@ -40,7 +40,7 @@ export interface VersionedSchema {
 export type VersionedSchemaDefinition = VersionedSchema | boolean;
 
 /** 旧値を置く項目名の後ろに付ける文言 */
-export const OLD_VALUE_LABEL = '（版の切り替え前の値）';
+export const OLD_VALUE_LABEL = '（切り替え前の値）';
 
 /** 分解されていた文字列を戻した値を、まとまりの旧値の中に置くときの項目名 */
 export const RESTORED_ORIGINAL_KEY = '分解されていた元の値';
@@ -71,7 +71,7 @@ export const isEmptyVersionedValue = (value: unknown): boolean => {
   return false;
 };
 
-const OLD_KEY_PATTERN = /^(.*)（版の切り替え前の値(?:・\d+)?）$/;
+const OLD_KEY_PATTERN = /^(.*)（切り替え前の値(?:・\d+)?）$/;
 
 /** 旧値の項目名か */
 export const isOldValueKey = (key: string): boolean => OLD_KEY_PATTERN.test(key);
@@ -86,7 +86,7 @@ export const getBaseNameOfOldValueKey = (key: string): string | undefined => {
 const newOldValueKey = (container: JsonObject, name: string): string => {
   let key = `${name}${OLD_VALUE_LABEL}`;
   for (let i = 2; key in container; i += 1) {
-    key = `${name}（版の切り替え前の値・${i}）`;
+    key = `${name}（切り替え前の値・${i}）`;
   }
   return key;
 };
@@ -209,7 +209,7 @@ const hasNewValue = (
 };
 
 /**
- * 形の合わない値を「版の切り替え前の値」として置き直す（表示・保存時）
+ * 形の合わない値を「切り替え前の値」として置き直す（表示・保存時）
  * 値に変更が無ければ、受け取ったものと同じ参照を返す
  * @param value 文書またはまとまりの値
  * @param schema 値に対応するスキーマ
@@ -412,7 +412,7 @@ export const FinalizeVersionedValuesForSave = <T>(
 
 /** 版と形の合わない値の種類 */
 export type VersionMismatchKind =
-  /** 版の切り替え前の値（「（版の切り替え前の値）」の項目）が残っている */
+  /** 切り替え前の値（「（切り替え前の値）」の項目）が残っている */
   | 'old_value'
   /** 文字列が 1 文字ずつに分解された形が残っている */
   | 'decomposed'
@@ -427,15 +427,15 @@ export interface VersionMismatchFinding {
   /** その版のスキーマに、入力し直す欄があるか（無い場合は × で消すか日付を見直す） */
   hasCurrentField: boolean;
   /**
-   * 版の切り替え前の値（old_value）について、同じ項目の新しい欄にすでに値があるか
-   * 値がある場合は、保存時に新しい欄の値が正となり、版の切り替え前の値は取り除かれる（他の種類では常に false）
+   * 切り替え前の値（old_value）について、同じ項目の新しい欄にすでに値があるか
+   * 値がある場合は、保存時に新しい欄の値が正となり、切り替え前の値は取り除かれる（他の種類では常に false）
    */
   newValueFilled: boolean;
 }
 
 /**
  * 保存を止める対象か
- * 形の変わった項目の「版の切り替え前の値」が残り、同じ項目の新しい欄が空のもの（入力し直すか × で消すまで保存できない）。
+ * 形の変わった項目の「切り替え前の値」が残り、同じ項目の新しい欄が空のもの（入力し直すか × で消すまで保存できない）。
  * 次のものは保存を止めない（保存時に旧値を取り除く、または読み取り専用のまま残す）
  * - 新しい欄にすでに値がある旧値（保存時に取り除く）
  * - 文書の版に入力し直す欄が無い値（新しい版に無い項目と同じ扱い。例: 2023 年版の文書に残る値）
@@ -449,7 +449,7 @@ export const IsSaveBlockingVersionMismatch = (
   finding.kind === 'old_value' && finding.hasCurrentField && !finding.newValueFilled;
 
 /**
- * 文書の中に、版と形の合わない値（版の切り替え前の値・分解された形・形の合わない値）が残っているかを調べる
+ * 文書の中に、版と形の合わない値（切り替え前の値・分解された形・形の合わない値）が残っているかを調べる
  * 文書は変更しない
  * - 旧版にしかない項目（スキーマに無い項目）や、型は同じで選択肢だけ変わった項目は対象にしない
  * - 分解された形は、スキーマに無い位置にあっても対象にする（古い版の文書に残った場合を含む）
@@ -487,7 +487,7 @@ export const FindVersionMismatchValues = (
         findings.push({
           path: [...path, base],
           kind: 'old_value',
-          // まとまりの中の旧値（例: POLE変異 > POLE変異（版の切り替え前の値））は、まとまりの欄に入力し直す
+          // まとまりの中の旧値（例: POLE変異 > POLE変異（切り替え前の値））は、まとまりの欄に入力し直す
           hasCurrentField: siblingSchema !== undefined || isOwnGroup,
           // 保存時の仕上げ（finalizeObject）と同じ基準で、新しい欄に値があるかを見る
           newValueFilled:
@@ -567,8 +567,8 @@ const findingKey = (finding: VersionMismatchFinding): string =>
 /**
  * 症例登録画面のエラー一覧に出す案内の対象を求める
  * 患者リストの「エラーあり」（HasVersionMismatchValue。保存されている値で判定）と、開いた直後の案内の有無を一致させる。
- * - 表示している値（置き直した値）に残る、版の切り替え前の値・分解された形を対象にする
- * - ただし、新しい欄に値がある版の切り替え前の値（保存時に取り除かれるもの）は、
+ * - 表示している値（置き直した値）に残る、切り替え前の値・分解された形を対象にする
+ * - ただし、新しい欄に値がある切り替え前の値（保存時に取り除かれるもの）は、
  *   開いた時点の値（baseline）にすでにあったものだけを対象にする。
  *   開いた後に利用者が新しい欄へ入力した項目は、入力した時点で案内を消す
  * 開いた直後（current と baseline が同じ）は、HasVersionMismatchValue(baseline) が真のとき、かつそのときだけ 1 件以上を返す

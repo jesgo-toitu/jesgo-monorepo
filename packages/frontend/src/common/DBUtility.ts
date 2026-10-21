@@ -132,7 +132,7 @@ const convertNullToUndefindForArray = (arrayObj: any[]) => {
 
 /**
  * 保存する文書の値を、文書の日付（event_date）で決まるスキーマの版に合わせて仕上げる
- * - 形の合わない値・分解された値を「版の切り替え前の値」の形に直す
+ * - 形の合わない値・分解された値を「切り替え前の値」の形に直す
  * - 同じ項目の新しい欄に値が入った旧値を取り除く
  * @param doc 文書
  * @returns 仕上げた値。変更が無ければ元の値（同じ参照）
@@ -171,10 +171,10 @@ const getVersionSchemaForSave = (
 };
 
 /**
- * 保存時と同じ版で、版の切り替え前の値の案内（保存を止める【要修正】を含む）を作り直す
+ * 保存時と同じ版で、切り替え前の値の案内（保存を止める【要修正】を含む）を作り直す
  * 入力エラーの検証（validateJesgoDocument）は、画面で保持している文書の日付で版を決める。
  * 保存処理（SaveChanges）は文書の日付を求め直してから仕上げるため、まだ描画されていない文書などで
- * 両者の版が食い違うと、新しい欄が空の版の切り替え前の値が検証をすり抜けて保存され得る。
+ * 両者の版が食い違うと、新しい欄が空の切り替え前の値が検証をすり抜けて保存され得る。
  * 版が食い違う文書だけ、保存時の版で案内を作り直し、保存の可否を保存時の版で判断する
  * @param saveData 保存するデータ
  * @param errors エラー一覧（追記・置き換えする）
@@ -619,7 +619,7 @@ const SaveChanges = async (
         jesgoDoc.value.document
       );
 
-      // 版の切り替え前の値の仕上げ: 同じ項目の新しい欄に値が入った旧値を取り除き、
+      // 切り替え前の値の仕上げ: 同じ項目の新しい欄に値が入った旧値を取り除き、
       // 形の合わない値・分解された値を旧値の形に直してから保存する
       const beforeFinalize: unknown = jesgoDoc.value.document;
       // eslint-disable-next-line no-param-reassign
@@ -776,14 +776,14 @@ export const hasJesgoCaseError = (
 
   // 自動生成部分のvalidation
   const errors: RegistrationErrors[] = validateJesgoDocument(saveData);
-  // 版の切り替え前の値は、保存時と同じ版で判定する
+  // 切り替え前の値は、保存時と同じ版で判定する
   applySaveTimeVersionMismatchErrors(saveData, errors);
   // エラー解消も反映させるため、必ずsetする
   setErrors(errors);
   dispatch({ type: 'SET_ERROR', extraErrors: errors });
 
   // 必須チェックのエラーのみの場合は保存できるようにする
-  // 版の切り替え前の値の案内のうち、新しい欄が空のまま旧値だけが残っているもの（VersionMismatchOldValue）は
+  // 切り替え前の値の案内のうち、新しい欄が空のまま旧値だけが残っているもの（VersionMismatchOldValue）は
   // 入力エラーと同じく保存を止める（保存ボタン・タブ切り替え時の保存・保存してリストに戻るのいずれもここを通る）
   for (let i = 0; i < errors.length; i += 1) {
     const schemaError = errors[i];

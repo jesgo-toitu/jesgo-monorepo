@@ -1260,11 +1260,11 @@ export const OpenOutputViewScript = (win: typeof window, srcData: string) => {
 };
 
 /**
- * 版の切り替え前の値が残っている項目について、エラー一覧に出す案内を作る
+ * 切り替え前の値が残っている項目について、エラー一覧に出す案内を作る
  * 判定は @jesgo/common の FindVersionMismatchGuides（患者リストの「エラーあり」と同じ規則）による。
  * 開いた直後は、患者リストで印の付く文書にだけ、かつ必ず案内が出る。
  * 開いた後に利用者が新しい欄へ入力した項目は、入力した時点で案内を消す。
- * 新しい欄が空のまま版の切り替え前の値だけが残っている項目（IsSaveBlockingVersionMismatch）は、
+ * 新しい欄が空のまま切り替え前の値だけが残っている項目（IsSaveBlockingVersionMismatch）は、
  * 【要修正】として入力エラーと同じく保存を止める（VALIDATE_TYPE.VersionMismatchOldValue）。
  * それ以外（新しい欄に値がある項目、入力し直す欄が無い項目）は、保存を妨げない案内とする
  * @param formData 文書の値（表示・編集中）
@@ -1281,10 +1281,10 @@ export const createVersionMismatchMessages = (
     (finding) => {
       const itemName = finding.path.join(' > ');
       if (IsSaveBlockingVersionMismatch(finding)) {
-        // 新しい欄が空のまま版の切り替え前の値だけが残っている（入力し直すか × で消すまで保存できない）
+        // 新しい欄が空のまま切り替え前の値だけが残っている（入力し直すか × で消すまで保存できない）
         return {
           // eslint-disable-next-line no-irregular-whitespace
-          message: `　　[ ${itemName} ] 【要修正】スキーマの版の切り替え前の値が残っています。新しい欄に入力し直すか、不要であれば × ボタンで版の切り替え前の値を消してから保存してください。`,
+          message: `　　[ ${itemName} ] 【要修正】切り替え前の台帳の値が残っています。新しい欄に入力し直すか、不要であれば × ボタンで切り替え前の値を消してから保存してください。`,
           validateType: VALIDATE_TYPE.VersionMismatchOldValue,
         };
       }
@@ -1292,23 +1292,23 @@ export const createVersionMismatchMessages = (
       if (finding.newValueFilled) {
         // 新しい欄にすでに値がある（保存時に新しい欄の値が正となる）
         guide =
-          '新しい欄の値と食い違いが無いかを確認し、保存してください（保存すると新しい欄の値が正となり、版の切り替え前の値は取り除かれます）。';
+          '新しい欄の値と食い違いが無いかを確認し、保存してください（保存すると新しい欄の値が正となり、切り替え前の値は取り除かれます）。';
       } else if (finding.hasCurrentField) {
         guide =
-          '値を確認して新しい欄に入力し直し、保存してください（保存すると版の切り替え前の値は取り除かれます）。';
+          '値を確認して新しい欄に入力し直し、保存してください（保存すると切り替え前の値は取り除かれます）。';
       } else {
         guide =
           'この版には入力し直す欄がありません。日付が正しいかを確認し、不要であれば × で削除して保存してください。';
       }
       return {
         // eslint-disable-next-line no-irregular-whitespace
-        message: `　　[ ${itemName} ] スキーマの版の切り替え前の値が残っています。${guide}`,
+        message: `　　[ ${itemName} ] 切り替え前の台帳の値が残っています。${guide}`,
         validateType: VALIDATE_TYPE.VersionMismatch,
       };
     }
   );
 
-/** 版の切り替え前の値の案内（保存を妨げないもの・保存を止めるもの）か */
+/** 切り替え前の値の案内（保存を妨げないもの・保存を止めるもの）か */
 const isVersionMismatchMessage = (item: ValidationItem): boolean =>
   item.validateType === VALIDATE_TYPE.VersionMismatch ||
   item.validateType === VALIDATE_TYPE.VersionMismatchOldValue;
@@ -1321,7 +1321,7 @@ const isVersionMismatchMessage = (item: ValidationItem): boolean =>
  * @param schemaId
  * @param schema
  * @param notAdd [true]jesgo:errorを追加しない(削除フラグを渡す想定)
- * @param versionSchema 文書の版のスキーマ。渡された場合は、版の切り替え前の値の案内も作り直す
+ * @param versionSchema 文書の版のスキーマ。渡された場合は、切り替え前の値の案内も作り直す
  * @returns
  */
 export const AddJesgoError = (
@@ -1337,7 +1337,7 @@ export const AddJesgoError = (
   const jesgoErrors = popJesgoError(formData);
   const errors = paramErrors;
 
-  // 版の切り替え前の値の案内は、文書の版のスキーマが渡された場合だけ作り直す
+  // 切り替え前の値の案内は、文書の版のスキーマが渡された場合だけ作り直す
   const updateVersionMessages = versionSchema !== undefined;
 
   // 元々あったjesgo:errorのエラーはクリアする
@@ -1426,7 +1426,7 @@ export const AddJesgoError = (
       }
     });
 
-    // 版の切り替え前の値の案内
+    // 切り替え前の値の案内
     messages.push(...versionMessages);
   }
 

@@ -159,7 +159,7 @@ const CustomDivForm = (props: CustomDivFormProp) => {
     orgSchemaRef.current = orgSchemaForClear;
   }
 
-  // 版の切り替えで形の合わなくなった値を、版の切り替え前の値として見える形に置き直す
+  // 版の切り替えで形の合わなくなった値を、切り替え前の値として見える形に置き直す
   // 形の合う値はそのまま（同じ参照）になるため、版の切り替えが無い文書には影響しない
   let versionSchema: JSONSchema7Json | undefined;
   if (orgSchemaForClear) {
