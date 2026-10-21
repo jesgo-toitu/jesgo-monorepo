@@ -292,8 +292,8 @@ v1.5.0からDocker開発環境とnpm run dev環境でポート番号を統一し
 
 ```bash
 # メインブランチから最新を取得
-git checkout main
-git pull origin main
+git checkout develop
+git pull origin develop
 
 # 機能ブランチを作成
 git checkout -b feature/your-feature-name
