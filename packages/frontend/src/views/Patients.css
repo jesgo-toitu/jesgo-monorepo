@@ -224,3 +224,25 @@ tr {
 .detail-footer-button {
   margin-left: 10px !important;
 }
+
+/* 絞り込み中の表示（一覧の上のボタン列の左端） */
+.list-filter-notice {
+  margin-right: auto;
+  padding: 6px 12px;
+  color: #8a6d3b;
+  background-color: #fcf8e3;
+  border: 1px solid #faebcc;
+  border-radius: 4px;
+  font-weight: bold;
+}
+
+.list-filter-notice .glyphicon {
+  margin-right: 6px;
+}
+
+/* 絞り込み中の表示（件数の横） */
+.list-filter-count-notice {
+  margin-left: 4px;
+  color: #8a6d3b;
+  font-weight: bold;
+}

@@ -48,18 +48,30 @@ const SearchDateComponent = React.memo(
       []
     );
 
-    const [isHiddenMonth, setisHiddenMonth] = useState(true);
-    const [isHiddenDay, setisHiddenDay] = useState(true);
+    // 入力欄の初期値は、親から渡された値があればその値とする
+    // （画面に現れた時点で親の値を空の値で上書きしないため。
+    //   患者リストへ戻ったとき・表示形式を切り替えたときに条件を保つ）
+    const initialSearchType = searchValue?.searchType ?? radioDefaultValue;
+    const [isHiddenMonth, setisHiddenMonth] = useState(
+      initialSearchType === '年次'
+    );
+    const [isHiddenDay, setisHiddenDay] = useState(
+      initialSearchType !== '日次'
+    );
     const [radioSelectedValue, setRadioSelectedValue] =
-      useState(radioDefaultValue);
+      useState(initialSearchType);
 
-    const [dateFromInfo, setDateFromInfo] =
-      useState<searchDateInfo>(dateInfoDefaultValue);
+    const [dateFromInfo, setDateFromInfo] = useState<searchDateInfo>(
+      searchValue?.fromInfo ?? dateInfoDefaultValue
+    );
 
-    const [dateToInfo, setDateToInfo] =
-      useState<searchDateInfo>(dateInfoDefaultValue);
+    const [dateToInfo, setDateToInfo] = useState<searchDateInfo>(
+      searchValue?.toInfo ?? dateInfoDefaultValue
+    );
 
-    const [isRangeSearch, setIsRangeSearch] = useState(false);
+    const [isRangeSearch, setIsRangeSearch] = useState(
+      searchValue?.isRange ?? false
+    );
 
     // 無限ループを防ぐため、前回の値を保存
     const prevValueRef = useRef<searchDateInfoDataSet | undefined>(undefined);
