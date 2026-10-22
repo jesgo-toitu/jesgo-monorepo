@@ -6,6 +6,7 @@ import { TreeView } from '@mui/x-tree-view/TreeView';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import ChevronRight from '@mui/icons-material/ChevronRight';
 import { JSONSchema7 } from 'json-schema';
+import { Const as ConstCommon } from '@jesgo/common';
 import { getPropItemsAndNames, GetSchemaInfo, GetSchemaIdFromString, CustomSchema } from '../CaseRegistration/SchemaUtility';
 import { extractEditableFields, FieldInfo } from '../../common/FieldValueToString';
 import CustomTreeItem from '../Schemamanager/CustomTreeItem';
@@ -43,7 +44,19 @@ export interface SchemaFieldTreeItem {
   isChildSchema?: boolean;
   /** サブスキーマのパス */
   subSchemaPath?: string;
+  /** プリセットの固定項目（初回治療開始日・診断・進行期）の値の元になる項目かどうか（選択不可として表示する） */
+  isFixedField?: boolean;
 }
+
+/**
+ * プリセットの固定項目の値の元になる項目かどうかを、項目の jesgo:tag で判定する
+ * 項目名では判定しない（固定項目と同じ名前の別の項目を選べなくしないため）
+ * @param fieldSchema 項目のスキーマ
+ */
+const isFixedFieldSource = (fieldSchema: JSONSchema7): boolean => {
+  const tag: unknown = (fieldSchema as Record<string, unknown>)[ConstCommon.JESGO_TAG.PREFIX];
+  return typeof tag === 'string' && ConstCommon.FIXED_FIELD_SOURCE_TAGS.includes(tag);
+};
 
 /**
  * スキーマフィールドツリーのProps
@@ -724,25 +737,31 @@ const generateTreeItems = (
         });
       } else {
         // 配列の要素がプリミティブ型の場合
+        // プリミティブ配列は選択可能（固定項目の値の元になる項目は選択不可）
+        const isFixedField = isFixedFieldSource(typedFieldSchema);
         items.push({
           id: currentPath,
           label: key,
           path: currentPath,
           schemaPath: parentSchemaPath,
           propertyPath: targetPrpertyPath,
-          selectable: true, // プリミティブ配列は選択可能
+          selectable: !isFixedField,
+          isFixedField,
           fieldInfo,
         });
       }
     } else {
       // 通常のフィールド（終端項目）
+      // 終端項目は選択可能（固定項目の値の元になる項目は選択不可）
+      const isFixedField = isFixedFieldSource(typedFieldSchema);
       items.push({
         id: currentPath,
         label: key,
         path: currentPath,
         schemaPath: parentSchemaPath,
         propertyPath: targetPrpertyPath,
-        selectable: true, // 終端項目は選択可能
+        selectable: !isFixedField,
+        isFixedField,
         fieldInfo,
       });
     }
@@ -862,6 +881,18 @@ const renderTreeItem = (
           }}
         >
           選択可能
+        </Typography>
+      )}
+      {item.isFixedField === true && (
+        <Typography
+          variant="caption"
+          style={{
+            fontSize: '10px',
+            color: '#666',
+            fontStyle: 'italic',
+          }}
+        >
+          固定項目のため選択不可
         </Typography>
       )}
     </Box>
