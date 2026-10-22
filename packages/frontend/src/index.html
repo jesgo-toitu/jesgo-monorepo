@@ -5,8 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JESGO</title>
     <link rel="icon" type="image/png" href="/image/icon.png">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap-theme.min.css" rel="stylesheet">
+    <!-- Bootstrap 3.3.7 の CSS はビルドが dist/bootstrap-dist/ へ出力する（webpack.config.js）。
+         稼働施設は外部に到達できないため、外部（CDN）を参照しない。
+         どの階層の URL で開いても読めるよう、ルートからの参照にする。 -->
+    <link href="/bootstrap-dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/bootstrap-dist/css/bootstrap-theme.min.css" rel="stylesheet">
 </head>
 <body>
     <div id="root"></div>

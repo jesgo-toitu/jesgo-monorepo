@@ -119,24 +119,6 @@ function Invoke-ExportProduction {
     [string] $RootDir
   )
   switch ($PackageName) {
-    'frontend' {
-      $resourceDir = Join-Path -Path "$RootDir" -ChildPath 'export\resource\webApp'
-      $distDir = Join-Path -Path "$ExportDir" -ChildPath 'dist'
-      $bootstrapDist = Join-Path -Path "$distDir" -ChildPath 'bootstrap-dist'
-      if (-not (Test-Path "$bootstrapDist" -PathType Container)) {
-        New-Item "$bootstrapDist" -ItemType Directory -Force -ErrorAction Stop
-        $bootstrapDir = Join-Path -Path "$resourceDir" -ChildPath 'bootstrap-dist'
-        (Get-ChildItem -Path "$bootstrapDir") | ForEach-Object {
-          Copy-Item -Path "$($_.FullName)" -Destination "$bootstrapDist" -Force -Recurse -ErrorAction Stop
-        }
-      }
-      $indexHtmlPath = Join-Path -Path "$distDir" -ChildPath 'index.html'
-      $indexHtml = Get-Content $indexHtmlPath -Raw
-      $indexHtml = $indexHtml -replace '(<link[^>]+href=")[^"]*(bootstrap\.min\.css")', '${1}./bootstrap-dist/css/$2'
-      $indexHtml = $indexHtml -replace '(<link[^>]+href=")[^"]*(bootstrap-theme\.min\.css")', '${1}./bootstrap-dist/css/$2'
-      $utf8WithNoBom = New-Object System.Text.UTF8Encoding($false)
-      [System.IO.File]::WriteAllText($indexHtmlPath, $indexHtml, $utf8WithNoBom)
-    }
     'backend' {
       @('log', 'uploads') | ForEach-Object {
         $dir = Join-Path -Path "$ExportDir" -ChildPath $_
