@@ -151,7 +151,7 @@ UTF-8
 | roll_id | title                | login | view  | add   | edit  | remove | data_manage | system_manage | plugin_registerable | plugin_executable_select | plugin_executable_update | deleted | preset_updatable |
 | ------- | -------------------- | ----- | ----- | ----- | ----- | ------ | ----------- | ------------- | ------------------- | ------------------------ | ------------------------ | ------- | ---------------- |
 | 0       | システム管理者       | TRUE  | TRUE  | TRUE  | TRUE  | TRUE   | TRUE        | TRUE          | TRUE                | TRUE                     | TRUE                     | FALSE   | TRUE             |
-| 1       | システムオペレーター | TRUE  | FALSE | FALSE | FALSE | FALSE  | FALSE       | TRUE          | FALSE               | TRUE                     | TRUE                     | FALSE   | FALSE            |
+| 1       | システムオペレーター | TRUE  | FALSE | FALSE | FALSE | FALSE  | FALSE       | TRUE          | FALSE               | TRUE                     | TRUE                     | FALSE   | TRUE             |
 | 100     | 上級ユーザ           | TRUE  | TRUE  | TRUE  | TRUE  | TRUE   | TRUE        | FALSE         | FALSE               | TRUE                     | TRUE                     | FALSE   | TRUE             |
 | 101     | 一般ユーザ           | TRUE  | TRUE  | TRUE  | TRUE  | FALSE  | FALSE       | FALSE         | FALSE               | TRUE                     | FALSE                    | FALSE   | FALSE            |
 | 999     | ログ用ユーザ         | FALSE | FALSE | FALSE | FALSE | FALSE  | FALSE       | FALSE         | FALSE               | FALSE                    | FALSE                    | FALSE   | FALSE            |
