@@ -194,7 +194,7 @@ export const getPresetList = async (): Promise<ApiReturnObject> => {
     
     const result = await dbAccess.query(query) as any[];
     
-    logging(LOGTYPE.DEBUG, `[HOT RELOAD TEST 2] プリセット一覧取得 - 取得件数: ${result.length}`, 'Presets-getPresetList');
+    logging(LOGTYPE.DEBUG, `プリセット一覧取得 - 取得件数: ${result.length}`, 'Presets-getPresetList');
     
     // デバッグ: 各プリセットの詳細をログ出力
     result.forEach((preset, index) => {

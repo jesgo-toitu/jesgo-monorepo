@@ -1517,13 +1517,7 @@ const Patients = () => {
   };
 
   const handleGotoPresetManager = () => {
-    // プラグイン登録と同様の権限チェック
-    const auth = localStorage.getItem('is_plugin_registerable');
-    if (auth !== 'true') {
-      // eslint-disable-next-line no-alert
-      alert('権限がありません');
-      return;
-    }
+    // プリセットの選択はログインしている利用者全員が使える（更新の操作は無い）
     navigate('/PatientListPresetManager');
   };
 

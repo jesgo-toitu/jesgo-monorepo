@@ -144,17 +144,20 @@ UTF-8
 | plugin_executable_select | boolean |          | FALSE      | データ抽出プラグイン実行可能                             |
 | plugin_executable_update | boolean |          | FALSE      | データ更新プラグイン実行可能                             |
 | deleted                  | boolean |          | FALSE      | 削除フラグ                                               |
+| preset_updatable         | boolean | NOT NULL | FALSE      | プリセット機能更新権限。プリセットの追加・編集・コピー・削除が可能(プリセット管理画面の一覧・内容の閲覧と、患者リストでのプリセットの選択はログインしていれば可能) |
 
 ### マスタ設定
 
-| roll_id | title                | login | view  | add   | edit  | remove | data_manage | system_manage | plugin_registerable | plugin_executable_select | plugin_executable_update | deleted |
-| ------- | -------------------- | ----- | ----- | ----- | ----- | ------ | ----------- | ------------- | ------------------- | ------------------------ | ------------------------ | ------- |
-| 0       | システム管理者       | TRUE  | TRUE  | TRUE  | TRUE  | TRUE   | TRUE        | TRUE          | TRUE                | TRUE                     | TRUE                     | FALSE   |
-| 1       | システムオペレーター | TRUE  | FALSE | FALSE | FALSE | FALSE  | FALSE       | TRUE          | FALSE               | TRUE                     | TRUE                     | FALSE   |
-| 100     | 上級ユーザ           | TRUE  | TRUE  | TRUE  | TRUE  | TRUE   | TRUE        | FALSE         | FALSE               | TRUE                     | TRUE                     | FALSE   |
-| 101     | 一般ユーザ           | TRUE  | TRUE  | TRUE  | TRUE  | FALSE  | FALSE       | FALSE         | FALSE               | TRUE                     | FALSE                    | FALSE   |
-| 999     | ログ用ユーザ         | FALSE | FALSE | FALSE | FALSE | FALSE  | FALSE       | FALSE         | FALSE               | FALSE                    | FALSE                    | FALSE   |
-| 1000    | 退職者               | FALSE | FALSE | FALSE | FALSE | FALSE  | FALSE       | FALSE         | FALSE               | FALSE                    | FALSE                    | FALSE   |
+| roll_id | title                | login | view  | add   | edit  | remove | data_manage | system_manage | plugin_registerable | plugin_executable_select | plugin_executable_update | deleted | preset_updatable |
+| ------- | -------------------- | ----- | ----- | ----- | ----- | ------ | ----------- | ------------- | ------------------- | ------------------------ | ------------------------ | ------- | ---------------- |
+| 0       | システム管理者       | TRUE  | TRUE  | TRUE  | TRUE  | TRUE   | TRUE        | TRUE          | TRUE                | TRUE                     | TRUE                     | FALSE   | TRUE             |
+| 1       | システムオペレーター | TRUE  | FALSE | FALSE | FALSE | FALSE  | FALSE       | TRUE          | FALSE               | TRUE                     | TRUE                     | FALSE   | FALSE            |
+| 100     | 上級ユーザ           | TRUE  | TRUE  | TRUE  | TRUE  | TRUE   | TRUE        | FALSE         | FALSE               | TRUE                     | TRUE                     | FALSE   | TRUE             |
+| 101     | 一般ユーザ           | TRUE  | TRUE  | TRUE  | TRUE  | FALSE  | FALSE       | FALSE         | FALSE               | TRUE                     | FALSE                    | FALSE   | FALSE            |
+| 999     | ログ用ユーザ         | FALSE | FALSE | FALSE | FALSE | FALSE  | FALSE       | FALSE         | FALSE               | FALSE                    | FALSE                    | FALSE   | FALSE            |
+| 1000    | 退職者               | FALSE | FALSE | FALSE | FALSE | FALSE  | FALSE       | FALSE         | FALSE               | FALSE                    | FALSE                    | FALSE   | FALSE            |
+
+※ preset_updatable 列とその値は、`batch/ver160/02_alter_jesgo_user_roll.sql` の適用で設定される(初期導入時も `01_create.sql`・`02_insert.sql` の後に各バージョンの更新 SQL を順に適用する)。
 
 ## (未使用)ログ (jesgo_log)
 

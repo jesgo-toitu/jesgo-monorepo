@@ -13,6 +13,7 @@ import {
 } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
+import { PresetPermissionText } from '@jesgo/common';
 import { UserMenu } from '../components/common/UserMenu';
 import { SystemMenu } from '../components/common/SystemMenu';
 import Loading from '../components/CaseRegistration/Loading';
@@ -23,6 +24,10 @@ import { settingsFromApi } from './Settings';
 import { storeSchemaInfo } from '../components/CaseRegistration/SchemaUtility';
 import { backToPatientsList } from '../common/CommonUtility';
 import PresetEditModal from '../components/Preset/PresetEditModal';
+import PresetViewModal, {
+  PresetViewData,
+} from '../components/Preset/PresetViewModal';
+import { hasPresetUpdatePermission } from '../common/PresetPermission';
 
 type settings = {
   facility_name: string;
@@ -78,6 +83,12 @@ const PresetManager = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
   const [editingPreset, setEditingPreset] = useState<PresetItem | null>(null);
+  // プリセット機能更新権限（ログイン時に端末へ保持した値。無ければ閲覧のみ）
+  const [canUpdatePreset] = useState<boolean>(hasPresetUpdatePermission());
+  const [showViewModal, setShowViewModal] = useState<boolean>(false);
+  const [viewingPreset, setViewingPreset] = useState<PresetViewData | null>(
+    null
+  );
 
   // 変更チェック（簡略化）
   const editingCheck = (
@@ -146,6 +157,9 @@ const PresetManager = () => {
           alert('削除しました。');
           // 一覧を再読み込み
           await loadPresetList();
+        } else if (deleteResult.statusNum === RESULT.UNAUTHORIZED_OPERATIONS) {
+          // プリセット機能更新権限が無い（ログイン中に外された場合など）
+          alert(PresetPermissionText.DELETE_DENIED);
         } else {
           alert(`削除に失敗しました: ${deleteResult.body}`);
         }
@@ -274,6 +288,44 @@ const PresetManager = () => {
     }
   };
 
+  // プリセットの閲覧（プリセット機能更新権限が無い利用者向け。取得だけを行い、保存・削除はしない）
+  const viewPreset = async (preset: PresetItem) => {
+    setIsLoading(true);
+
+    try {
+      const result = await apiAccess(
+        METHOD_TYPE.GET,
+        `/preset-detail/${preset.preset_id}`
+      );
+
+      if (result.statusNum === RESULT.NORMAL_TERMINATION) {
+        const presetDetail = result.body as {
+          preset_name: string;
+          preset_description: string | null;
+          fields?: PresetViewData['fields'];
+        };
+        setViewingPreset({
+          preset_name: presetDetail.preset_name,
+          preset_description: presetDetail.preset_description ?? '',
+          fields: presetDetail.fields || [],
+        });
+        setShowViewModal(true);
+      } else {
+        alert(`プリセット詳細の取得に失敗しました: ${String(result.body)}`);
+      }
+    } catch {
+      alert('プリセット詳細の取得中にエラーが発生しました');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 閲覧ダイアログの非表示処理
+  const handleViewModalHide = () => {
+    setShowViewModal(false);
+    setViewingPreset(null);
+  };
+
   // モーダルの保存成功処理
   const handleModalSaveSuccess = () => {
     // 一覧を再読み込み
@@ -319,14 +371,17 @@ const PresetManager = () => {
 
       <div className="schema-buttons">
         <div className="schema-inner">
-          <Button
-            bsStyle="success"
-            className="normal-button"
-            title="新しいプリセットを追加します"
-            onClick={addPreset}
-          >
-            追加
-          </Button>
+          {/* プリセット機能更新権限が無い場合は表示しない */}
+          {canUpdatePreset && (
+            <Button
+              bsStyle="success"
+              className="normal-button"
+              title="新しいプリセットを追加します"
+              onClick={addPreset}
+            >
+              追加
+            </Button>
+          )}
           {/*<Button
             bsStyle="info"
             className="normal-button"
@@ -383,6 +438,20 @@ const PresetManager = () => {
                     <td>{new Date(preset.updated_at).toLocaleString('ja-JP')}</td>
                     <td className="preset-table-short">
                       <ButtonToolbar>
+                        {!canUpdatePreset ? (
+                        // プリセット機能更新権限が無い場合は閲覧だけ（編集・コピー・削除は表示しない）
+                        <ButtonGroup>
+                          <Button
+                            title="内容を見る"
+                            onClick={() => {
+                              // eslint-disable-next-line no-void
+                              void viewPreset(preset);
+                            }}
+                          >
+                            <Glyphicon glyph="eye-open" />
+                          </Button>
+                        </ButtonGroup>
+                        ) : (
                         <ButtonGroup>
                           <Button
                             title={isSystemPreset ? 'システムプリセットは編集できません' : '編集'}
@@ -405,6 +474,7 @@ const PresetManager = () => {
                             <Glyphicon glyph="trash" />
                           </Button>
                         </ButtonGroup>
+                        )}
                       </ButtonToolbar>
                     </td>
                   </tr>
@@ -415,6 +485,13 @@ const PresetManager = () => {
       </div>
       {isLoading && <Loading />}
       
+      {/* プリセット閲覧ダイアログ（プリセット機能更新権限が無い利用者向け） */}
+      <PresetViewModal
+        show={showViewModal}
+        onHide={handleViewModalHide}
+        presetData={viewingPreset}
+      />
+
       {/* プリセット編集モーダル */}
       <PresetEditModal
         show={showEditModal}

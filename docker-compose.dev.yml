@@ -53,6 +53,7 @@ services:
       - ./packages/backend/doc/DB/batch/ver150/08_create_function_get_jesgo_filtered_root_document.sql:/docker-entrypoint-initdb.d/29_ver150_08_create_function_get_jesgo_filtered_root_document.sql
       # ver160
       - ./packages/backend/doc/DB/batch/ver160/01_alter_jesgo_user.sql:/docker-entrypoint-initdb.d/30_ver160_01_alter_jesgo_user.sql
+      - ./packages/backend/doc/DB/batch/ver160/02_alter_jesgo_user_roll.sql:/docker-entrypoint-initdb.d/31_ver160_02_alter_jesgo_user_roll.sql
     networks:
       - jesgo-network
     healthcheck:

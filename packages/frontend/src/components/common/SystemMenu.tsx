@@ -85,8 +85,13 @@ export const SystemMenu = (props: {
 
   const handlPresetManager = () => {
     if (isConfirm === null || isConfirm()) {
-      // プラグイン登録と同様の権限設定
-      checkAuth('is_plugin_registerable', '/PresetManager');
+      // プリセット管理画面はログインしている利用者全員が開ける
+      // （プリセット機能更新権限が無い利用者は閲覧のみ。追加・編集・コピー・削除は画面と API で制限する）
+      if (isTransitionOk && !isTransitionOk()) {
+        return;
+      }
+      RemoveBeforeUnloadEvent();
+      navigate('/PresetManager');
     }
   };
 

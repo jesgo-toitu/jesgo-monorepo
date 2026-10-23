@@ -12,6 +12,7 @@ import { LoadPluginList } from '../common/DBUtility';
 import { jesgoPluginColumns } from '../common/Plugin';
 import { storeHideSaveConfirm } from '../common/UserSetting';
 import { clearPatientListViewState } from '../common/PatientListViewState';
+import { storePresetUpdatable } from '../common/PresetPermission';
 
 export interface localStorageObject {
   user_id: number;
@@ -28,6 +29,8 @@ export interface localStorageObject {
   is_plugin_executable_update: boolean;
   is_data_manage_roll: boolean;
   is_system_manage_roll: boolean;
+  // プリセット機能更新権限（旧版のサーバでは項目が無いため任意）
+  is_preset_updatable?: boolean;
   // 利用者ごとの設定: 保存確認ダイアログを表示しない(true)／表示する(false)
   hide_save_confirm?: boolean;
 }
@@ -113,6 +116,8 @@ export const Login = () => {
         'is_system_manage_roll',
         localStorageObj.is_system_manage_roll.toString()
       );
+      // プリセット機能更新権限（値が無い場合は権限なし）
+      storePresetUpdatable(localStorageObj.is_preset_updatable);
       // 利用者ごとの設定は、ログインのたびにサーバの値で必ず上書きする
       // （同じ端末で前にログインしていた利用者の設定を引き継がない。値が無い場合は既定値＝表示する）
       storeHideSaveConfirm(localStorageObj.hide_save_confirm);
