@@ -28,7 +28,7 @@ import { JesgoDocumentSchema } from '../../store/schemaDataReducer';
 import { FieldInfo } from '../../common/FieldValueToString';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
 import { treeApiObject, treeSchema } from '../Schemamanager/SchemaTree';
-import { FIXED_FIELD_NAMES } from '@jesgo/common';
+import { FIXED_FIELD_NAMES, PresetPermissionText } from '@jesgo/common';
 
 // プリセット項目の型定義
 interface PresetItemField {
@@ -967,6 +967,9 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
         if (onSaveSuccess) {
           onSaveSuccess();
         }
+      } else if (result.statusNum === RESULT.UNAUTHORIZED_OPERATIONS) {
+        // プリセット機能更新権限が無い（ログイン中に外された場合など）。編集中の内容は残す
+        alert(PresetPermissionText.SAVE_DENIED);
       } else {
         // エラーメッセージをより分かりやすく表示
         const errorMessage = result.body || '保存に失敗しました';

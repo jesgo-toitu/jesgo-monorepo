@@ -33,6 +33,7 @@ FORMAT: 1A
       is_plugin_executable_update: boolean;
       is_data_manage_roll: boolean;
       is_system_manage_roll: boolean;
+      is_preset_updatable: boolean; // プリセット機能更新権限
       hide_save_confirm: boolean;
     }
     ```
@@ -293,6 +294,7 @@ DB に保存されている全ての情報が確認できる。
         plugin_registerable: boolean;
         plugin_executable_select: boolean;
         plugin_executable_update: boolean;
+        preset_updatable?: boolean; // プリセット機能更新権限(DB 更新が未適用の場合は項目なし)
         deleted: boolean;
       }[]
     ```
@@ -341,6 +343,7 @@ DB に保存されている全ての情報が確認できる。
     plugin_registerable: boolean;
     plugin_executable_select: boolean;
     plugin_executable_update: boolean;
+    preset_updatable?: boolean; // プリセット機能更新権限(省略した行はこの権限を更新しない。新規の行は権限なし)
     deleted: boolean;
   }[]
   ```

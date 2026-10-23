@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
 import { AddBeforeUnloadEvent } from '../../common/CommonUtility';
 import { ReadStaffList } from '../../common/DBUtility';
+import { storePresetUpdatable } from '../../common/PresetPermission';
 import staffData from './StaffData';
 
 type JesgoUserRoll = {
@@ -32,6 +33,8 @@ type JesgoUserRoll = {
   plugin_registerable: boolean;
   plugin_executable_select: boolean;
   plugin_executable_update: boolean;
+  // プリセット機能更新権限（DB 更新が未適用の場合はサーバが項目を返さない）
+  preset_updatable?: boolean;
 
   deleted: boolean;
 };
@@ -50,6 +53,7 @@ const initJesgoUserRoll: JesgoUserRoll = {
   plugin_registerable: false,
   plugin_executable_select: false,
   plugin_executable_update: false,
+  preset_updatable: false,
   deleted: false,
 };
 
@@ -64,8 +68,15 @@ const UserRollRow = React.memo(
     setChangedUserRoll: React.Dispatch<React.SetStateAction<JesgoUserRoll>>;
     staffList: staffData[];
     rawRollList: JesgoUserRoll[];
+    showPresetColumn: boolean;
   }): JSX.Element => {
-    const { targetRoll, setChangedUserRoll, staffList, rawRollList } = props;
+    const {
+      targetRoll,
+      setChangedUserRoll,
+      staffList,
+      rawRollList,
+      showPresetColumn,
+    } = props;
     const [roll, setRoll] = useState<JesgoUserRoll>(targetRoll);
 
     const onChangeValue = (e: React.FormEvent<FormControl>) => {
@@ -94,6 +105,8 @@ const UserRollRow = React.memo(
         setRoll({ ...roll, plugin_executable_select: element.checked });
       } else if (targetId.includes('chkPluginUpdate')) {
         setRoll({ ...roll, plugin_executable_update: element.checked });
+      } else if (targetId.includes('chkPresetUpdatable')) {
+        setRoll({ ...roll, preset_updatable: element.checked });
       }
     };
 
@@ -209,6 +222,15 @@ const UserRollRow = React.memo(
             onChange={onChangeValue}
           />
         </td>
+        {showPresetColumn && (
+          <td className="text-center">
+            <Checkbox
+              id={`chkPresetUpdatable_${roll.roll_id}`}
+              checked={roll.preset_updatable === true}
+              onChange={onChangeValue}
+            />
+          </td>
+        )}
         <td className="text-center">
           <Button title="削除" onClick={deleteRoll}>
             <Glyphicon glyph="trash" />
@@ -233,6 +255,8 @@ const UserRollSetting = forwardRef(
     const [rollList, setRollList] = useState<JesgoUserRoll[]>([]);
     const [loadedRollList, setLoadedRollList] = useState<JesgoUserRoll[]>([]);
     const [staffList, setStaffList] = useState<staffData[]>([]);
+    // プリセット機能更新権限の列を表示するか（DB 更新が未適用でサーバが項目を返さない場合は表示しない）
+    const [showPresetColumn, setShowPresetColumn] = useState<boolean>(true);
 
     const [changedRoll, setChangedRoll] =
       useState<JesgoUserRoll>(initJesgoUserRoll);
@@ -277,6 +301,9 @@ const UserRollSetting = forwardRef(
             ?.data as JesgoUserRoll[];
           setRollList([...readData]);
           setLoadedRollList([...readData]);
+          setShowPresetColumn(
+            readData.every((p) => typeof p.preset_updatable === 'boolean')
+          );
 
           const rollInfo = readData.find(
             (p) => p.roll_id.toString() === localStorage.getItem('roll_id')
@@ -307,6 +334,7 @@ const UserRollSetting = forwardRef(
               'is_system_manage_roll',
               rollInfo.system_manage.toString()
             );
+            storePresetUpdatable(rollInfo.preset_updatable);
           }
         } else {
           navigate('/login');
@@ -342,6 +370,10 @@ const UserRollSetting = forwardRef(
     const createNewRecord = () => {
       const newRecord: JesgoUserRoll = { ...initJesgoUserRoll };
       newRecord.isNew = true;
+      if (!showPresetColumn) {
+        // 列を表示していない場合は項目を送らない
+        delete newRecord.preset_updatable;
+      }
       // 表示中のroll_idと被らないroll_idを付与する
       if (rollList.length === 0) {
         newRecord.roll_id = 10000;
@@ -443,6 +475,13 @@ const UserRollSetting = forwardRef(
                 <br />
                 データ更新権限
               </th>
+              {showPresetColumn && (
+                <th className="text-center">
+                  プリセット機能
+                  <br />
+                  更新権限
+                </th>
+              )}
               <th className="text-center">削除</th>
             </tr>
           </thead>
@@ -456,6 +495,7 @@ const UserRollSetting = forwardRef(
                   staffList={staffList}
                   setChangedUserRoll={setChangedRoll}
                   rawRollList={rollList}
+                  showPresetColumn={showPresetColumn}
                 />
               ))}
           </tbody>

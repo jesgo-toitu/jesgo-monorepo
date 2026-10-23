@@ -17,6 +17,7 @@ import {
   PASSWORD_PATTERN,
   UserSetting,
   DEFAULT_USER_SETTING,
+  PRESET_UPDATE_PERMISSION,
 } from '@jesgo/common';
 
 // 共通パッケージからの再エクスポート
@@ -157,6 +158,8 @@ export interface localStorageObject {
   is_plugin_executable_update: boolean;
   is_data_manage_roll: boolean;
   is_system_manage_roll: boolean;
+  // プリセット機能更新権限（DB 更新が未適用の場合は false）
+  is_preset_updatable: boolean;
   // 利用者ごとの設定: 保存確認ダイアログを表示しない(true)／表示する(false)
   hide_save_confirm: boolean;
 }
@@ -174,6 +177,8 @@ interface rollAuth {
   plugin_registerable: boolean;
   plugin_executable_select: boolean;
   plugin_executable_update: boolean;
+  // プリセット機能更新権限（DB 更新が未適用の場合は列が無いため undefined）
+  preset_updatable?: boolean;
   deleted: boolean;
 }
 
@@ -192,6 +197,7 @@ export type JesgoUserRoll = {
   plugin_registerable: boolean;
   plugin_executable_select: boolean;
   plugin_executable_update: boolean;
+  preset_updatable?: boolean; // プリセット機能更新権限
 
   deleted: boolean;
 };
@@ -211,6 +217,44 @@ export const roll = {
   pluginRegisterable: 'plugin_registerable',
   pluginSelect: 'plugin_executable_select',
   pluginUpdate: 'plugin_executable_update',
+  presetUpdatable: PRESET_UPDATE_PERMISSION.COLUMN,
+};
+
+/** DB 更新が未適用のときのログ（原因と、プリセットの更新を権限なしとして扱うことを示す） */
+const PRESET_UPDATABLE_COLUMN_MISSING_MESSAGE = `ユーザロールテーブルに${PRESET_UPDATE_PERMISSION.LABEL}の列(${PRESET_UPDATE_PERMISSION.COLUMN})がありません。DB 更新(batch/ver160/02_alter_jesgo_user_roll.sql)が未適用のため、プリセットの更新は全員「権限なし」として扱います`;
+
+/**
+ * ユーザロールテーブルにプリセット機能更新権限の列があるか否か
+ * (DB 更新が未適用の DB に接続した場合でも、ログインや他の機能を止めないために確認する)
+ * @param dbAccess 接続済みの DbAccess
+ * @returns 列があれば true
+ */
+export const hasPresetUpdatableColumn = async (
+  dbAccess: DbAccess
+): Promise<boolean> => {
+  const ret = (await dbAccess.query(
+    `SELECT COUNT(*) AS cnt FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'jesgo_user_roll' AND column_name = $1`,
+    [PRESET_UPDATE_PERMISSION.COLUMN]
+  )) as { cnt: string | number }[];
+  return ret.length > 0 && Number(ret[0].cnt) > 0;
+};
+
+/**
+ * DB 更新が未適用でプリセット機能更新権限の列が無いことをログに残す
+ * @param functionName 呼び出し元の関数名
+ * @param displayName 呼び出し元の区分（省略時は Users）
+ */
+export const logPresetUpdatableColumnMissing = (
+  functionName: string,
+  displayName = 'Users'
+): void => {
+  logging(
+    LOGTYPE.ERROR,
+    PRESET_UPDATABLE_COLUMN_MISSING_MESSAGE,
+    displayName,
+    functionName
+  );
 };
 
 /**
@@ -718,7 +762,12 @@ export const decordJwt = (token: Jwt, isReflesh = false): ApiReturnObject => {
 export const getUsernameFromRequest = (req: any) => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'getUsernameFromRequest');
   try {
-    const jwt: Jwt = { token: getToken(req) };
+    const token = getToken(req);
+    if (token === undefined) {
+      // トークンが付いていない場合はログイン名なし
+      return '';
+    }
+    const jwt: Jwt = { token };
     const myApiReturnObject = decordJwt(jwt);
     if (myApiReturnObject.statusNum === RESULT.NORMAL_TERMINATION) {
       return (myApiReturnObject.body as jwtPayload).display_name;
@@ -735,7 +784,12 @@ export const getUsernameFromRequest = (req: any) => {
 export const getUserIdFromRequest = (req: any) => {
   logging(LOGTYPE.DEBUG, '呼び出し', 'Users', 'getUserIdFromRequest');
   try {
-    const jwt: Jwt = { token: getToken(req) };
+    const token = getToken(req);
+    if (token === undefined) {
+      // トークンが付いていない場合は-1を返す
+      return -1;
+    }
+    const jwt: Jwt = { token };
     const myApiReturnObject = decordJwt(jwt);
     if (myApiReturnObject.statusNum === RESULT.NORMAL_TERMINATION) {
       return (myApiReturnObject.body as jwtPayload).user_id;
@@ -765,6 +819,13 @@ export const checkAuth = async (
       body: null,
     };
     if (token === undefined) {
+      // トークンが付いていない呼び出しは、未認証として拒否する
+      logging(
+        LOGTYPE.WARN,
+        'トークンが付いていないため、未認証として拒否しました。',
+        'Users',
+        'checkAuth'
+      );
       return myApiReturnObject;
     }
     const jwt: Jwt = { token: token };
@@ -856,6 +917,32 @@ export const loginUser = async (
     [ret[0].roll_id]
   )) as rollAuth[];
 
+  // プリセット機能更新権限を取得する。
+  // 列が未追加(DB更新が未適用)の場合でもログインは継続し、権限なし(安全側)として扱う
+  let presetUpdatable = false;
+  try {
+    if (roll.length > 0) {
+      if (await hasPresetUpdatableColumn(dbAccess)) {
+        const presetRows = (await dbAccess.query(
+          `SELECT ${PRESET_UPDATE_PERMISSION.COLUMN} AS preset_updatable FROM jesgo_user_roll WHERE roll_id = $1`,
+          [ret[0].roll_id]
+        )) as { preset_updatable: boolean | null }[];
+        presetUpdatable =
+          presetRows.length > 0 && presetRows[0].preset_updatable === true;
+      } else {
+        logPresetUpdatableColumnMissing('loginUser');
+      }
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラー';
+    logging(
+      LOGTYPE.ERROR,
+      `${PRESET_UPDATE_PERMISSION.LABEL}を取得できないため、権限なしとして扱います: ${errorMessage}`,
+      'Users',
+      'loginUser'
+    );
+  }
+
   // 利用者ごとの設定(保存確認の表示設定)を取得する。
   // 列が未追加(DB更新が未適用)などで取得できない場合でもログインは継続し、既定値(表示する)として扱う
   let hideSaveConfirm: boolean = DEFAULT_USER_SETTING.hide_save_confirm;
@@ -902,6 +989,7 @@ export const loginUser = async (
       is_plugin_executable_update: roll[0].plugin_executable_update,
       is_data_manage_roll: roll[0].data_manage,
       is_system_manage_roll: roll[0].system_manage,
+      is_preset_updatable: presetUpdatable,
       hide_save_confirm: hideSaveConfirm,
     };
     const tokens = generateTokens(ret[0]);
@@ -1007,11 +1095,25 @@ export const getUserRollList = async (
       whereParams.push([0, 999]);
     }
 
-    const roll = (await dbAccess.query(
+    const rawRoll = (await dbAccess.query(
       `SELECT * FROM jesgo_user_roll WHERE ${whereSql} ORDER BY roll_id`,
       whereParams
     )) as rollAuth[];
+    const hasPresetColumn = await hasPresetUpdatableColumn(dbAccess);
     await dbAccess.end();
+
+    // プリセット機能更新権限:
+    // ・列がある場合は、値が無い(NULL)行を権限なし(false)とする
+    // ・列が無い(DB更新が未適用)場合は項目を返さない(画面はこの項目が無いとき列を表示しない)
+    let roll: rollAuth[] = rawRoll;
+    if (hasPresetColumn) {
+      roll = rawRoll.map((p) => ({
+        ...p,
+        preset_updatable: p.preset_updatable === true,
+      }));
+    } else {
+      logPresetUpdatableColumnMissing('getUserRollList');
+    }
 
     logging(
       LOGTYPE.DEBUG,
@@ -1098,6 +1200,12 @@ export const saveUserRoll = async (
     }
 
     if (userRollList && userRollList.length > 0) {
+      // プリセット機能更新権限の列が無い(DB更新が未適用)場合は、その列を除いて従来どおり保存する
+      const canSavePresetUpdatable = await hasPresetUpdatableColumn(dbAccess);
+      if (!canSavePresetUpdatable) {
+        logPresetUpdatableColumnMissing('saveUserRoll');
+      }
+
       await dbAccess.query('BEGIN');
       for (const roll of userRollList) {
         currentRoll = roll;
@@ -1136,6 +1244,29 @@ export const saveUserRoll = async (
         }
 
         await dbAccess.query(sqlQuery, params);
+
+        // プリセット機能更新権限を、同じトランザクション内で続けて更新する。
+        // 項目が無い(真偽値でない)行は列を更新しない(更新前の画面などから保存しても、施設が付けた値を外さない。
+        // 新規の行は列の既定値＝権限なし)
+        if (
+          sqlQuery !== '' &&
+          canSavePresetUpdatable &&
+          typeof roll.preset_updatable === 'boolean'
+        ) {
+          if (roll.isNew) {
+            // 新規の行は、同じ処理で採番した最大の roll_id の行
+            await dbAccess.query(
+              `UPDATE jesgo_user_roll SET ${PRESET_UPDATE_PERMISSION.COLUMN} = $1
+                WHERE roll_id = (SELECT max(roll_id) FROM jesgo_user_roll)`,
+              [roll.preset_updatable]
+            );
+          } else {
+            await dbAccess.query(
+              `UPDATE jesgo_user_roll SET ${PRESET_UPDATE_PERMISSION.COLUMN} = $1 WHERE roll_id = $2`,
+              [roll.preset_updatable, roll.roll_id]
+            );
+          }
+        }
       }
       await dbAccess.query('COMMIT');
       logging(LOGTYPE.INFO, 'jesgo_user_roll更新完了', 'Users', 'saveUserRoll');

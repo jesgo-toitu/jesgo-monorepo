@@ -22,7 +22,12 @@ import {
   JesgoUserRoll,
   getUserSetting,
   updateUserSetting,
+  hasPresetUpdatableColumn,
+  logPresetUpdatableColumnMissing,
+  decordJwt,
 } from '../services/Users';
+import { PRESET_UPDATE_PERMISSION, PresetPermissionText } from '@jesgo/common';
+import { DbAccess } from '../logic/DbAccess';
 import {
   deletePatient,
   searchPatientRequest,
@@ -113,6 +118,87 @@ const getTokenOrUndefined = (req: express.Request): string | undefined => {
   } catch {
     return undefined;
   }
+};
+
+/**
+ * プリセットの更新(保存・削除)の権限を確認する
+ * プリセット機能更新権限だけで判定する(プラグイン登録権限は見ない)。
+ * 権限が無い場合は日本語で運用ログに残し、権限不足エラーとして応答する。
+ * DB 更新が未適用(列が無い)場合も権限なしとして扱う。
+ * @param req リクエスト
+ * @param routeName ログに出すルート名
+ * @param operation ログに出す操作名(保存・削除)
+ * @returns 権限があれば NORMAL_TERMINATION。無ければ応答としてそのまま返すオブジェクト
+ */
+const checkPresetUpdateAuth = async (
+  req: express.Request,
+  routeName: string,
+  operation: string
+): Promise<ApiReturnObject> => {
+  const token = getTokenOrUndefined(req);
+  if (token === undefined) {
+    logging(
+      LOGTYPE.WARN,
+      `ログインしていない(トークンが無い)ため、プリセットの${operation}を拒否しました`,
+      'router',
+      routeName
+    );
+    return { statusNum: RESULT.ABNORMAL_TERMINATION, body: null };
+  }
+
+  // 認証(トークンの検証)を先に行う。不正・期限切れは従来どおりの応答(未認証 -1／期限切れ -10)
+  const tokenCheck = decordJwt({ token });
+  if (tokenCheck.statusNum !== RESULT.NORMAL_TERMINATION) {
+    return { statusNum: tokenCheck.statusNum, body: null };
+  }
+
+  // DB 更新が未適用の場合は権限なし(安全側)
+  const dbAccess = new DbAccess();
+  let hasColumn = false;
+  try {
+    await dbAccess.connectWithConf();
+    hasColumn = await hasPresetUpdatableColumn(dbAccess);
+  } catch (err) {
+    logging(
+      LOGTYPE.ERROR,
+      `${PRESET_UPDATE_PERMISSION.LABEL}の確認に失敗したため、プリセットの${operation}を拒否しました: ${(err as Error).message}`,
+      'router',
+      routeName,
+      getUsernameFromRequest(req)
+    );
+    return { statusNum: RESULT.ABNORMAL_TERMINATION, body: null };
+  } finally {
+    await dbAccess.end();
+  }
+  if (!hasColumn) {
+    logPresetUpdatableColumnMissing(routeName, 'router');
+    return {
+      statusNum: RESULT.UNAUTHORIZED_OPERATIONS,
+      body: PresetPermissionText.DENIED,
+    };
+  }
+
+  const authResult = await checkAuth(token, roll.presetUpdatable);
+  if (authResult.statusNum === RESULT.NORMAL_TERMINATION && authResult.body === true) {
+    return authResult;
+  }
+  if (authResult.body === false) {
+    // ログインは有効だが権限が無い
+    logging(
+      LOGTYPE.WARN,
+      `${PRESET_UPDATE_PERMISSION.LABEL}がないため、プリセットの${operation}を拒否しました`,
+      'router',
+      routeName,
+      getUsernameFromRequest(req)
+    );
+    return {
+      statusNum: RESULT.UNAUTHORIZED_OPERATIONS,
+      body: PresetPermissionText.DENIED,
+      userId: authResult.userId,
+    };
+  }
+  // トークンの期限切れ・不正など(従来どおりの応答)
+  return authResult;
 };
 
 // routerにルーティングの動作を記述する
@@ -1527,10 +1613,11 @@ router.post('/preset-save', async (req, res, next) => {
     getUsernameFromRequest(req)
   );
   
-  // 権限の確認（プラグイン登録と同様の権限設定）
-  const authResult: ApiReturnObject = await checkAuth(
-    getToken(req),
-    roll.pluginRegisterable
+  // 権限の確認（プリセット機能更新権限）
+  const authResult: ApiReturnObject = await checkPresetUpdateAuth(
+    req,
+    '/preset-save',
+    '保存'
   );
   if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
     res.status(200).send(authResult);
@@ -1576,10 +1663,11 @@ router.delete('/preset-delete/:presetId', async (req, res, next) => {
     getUsernameFromRequest(req)
   );
   
-  // 権限の確認（プラグイン登録と同様の権限設定）
-  const authResult: ApiReturnObject = await checkAuth(
-    getToken(req),
-    roll.pluginRegisterable
+  // 権限の確認（プリセット機能更新権限）
+  const authResult: ApiReturnObject = await checkPresetUpdateAuth(
+    req,
+    '/preset-delete',
+    '削除'
   );
   if (authResult.statusNum !== RESULT.NORMAL_TERMINATION) {
     res.status(200).send(authResult);

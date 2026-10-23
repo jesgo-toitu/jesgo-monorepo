@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { RemoveBeforeUnloadEvent } from '../../common/CommonUtility';
 import { clearUserSetting } from '../../common/UserSetting';
 import { clearPatientListViewState } from '../../common/PatientListViewState';
+import { clearPresetUpdatable } from '../../common/PresetPermission';
 import { StaffPasswordChangeModalDialog } from '../Staff/StaffPasswordChangeModal';
 import ModalDialog from './ModalDialog';
 import { UserSettingModalDialog } from './UserSettingModal';
@@ -44,7 +45,6 @@ export const UserMenu = (props: {
   const modalHide = useCallback(() => {}, []);
 
   const modalOk = useCallback(() => {
-    // ログアウト時にプリセット設定を保存（localStorageに保存されているため自動的に保持される）
     setShow(false);
     RemoveBeforeUnloadEvent();
     
@@ -65,6 +65,7 @@ export const UserMenu = (props: {
     localStorage.removeItem('is_plugin_executable_update');
     localStorage.removeItem('is_data_manage_roll');
     localStorage.removeItem('is_system_manage_roll');
+    clearPresetUpdatable();
 
     // 利用者ごとの設定を削除（次にログインする利用者へ引き継がない）
     clearUserSetting();
@@ -72,8 +73,8 @@ export const UserMenu = (props: {
     // 患者リストの検索・絞り込みの状態を削除（次にログインする利用者へ引き継がない）
     clearPatientListViewState();
 
-    // プリセットIDは保持（次回ログイン時に使用）
-    // localStorage.removeItem('selected_preset_id'); // コメントアウト：保持する
+    // 患者リストのプリセットの選択を削除（次にログインする利用者へ引き継がない）
+    localStorage.removeItem('selected_preset_id');
     
     navigate('/login');
   }, [setShow, navigate]);
