@@ -23,6 +23,18 @@ export namespace Const {
   } as const;
 
   /**
+   * プリセットの固定項目（初回治療開始日・診断・進行期）の値の元になる項目の jesgo:tag
+   * 患者リストでは、これらのタグを持つ項目の値から固定項目の値を作る。
+   * プリセットの項目選択では、固定項目と同じ値の列を重ねて登録しないよう、これらのタグを持つ項目を選べなくする
+   */
+  export const FIXED_FIELD_SOURCE_TAGS: readonly string[] = [
+    JESGO_TAG.INITIAL_TREATMENT_DATE,
+    JESGO_TAG.CANCER_MAJOR,
+    JESGO_TAG.CANCER_MINOR,
+    JESGO_TAG.FIGO,
+  ];
+
+  /**
    * UiSchemaプロパティ
    */
   export const UI_WIDGET = {

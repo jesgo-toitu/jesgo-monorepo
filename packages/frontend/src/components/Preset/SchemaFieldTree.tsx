@@ -6,6 +6,7 @@ import { TreeView } from '@mui/x-tree-view/TreeView';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import ChevronRight from '@mui/icons-material/ChevronRight';
 import { JSONSchema7 } from 'json-schema';
+import { Const as ConstCommon } from '@jesgo/common';
 import { getPropItemsAndNames, GetSchemaInfo, GetSchemaIdFromString, CustomSchema } from '../CaseRegistration/SchemaUtility';
 import { extractEditableFields, FieldInfo } from '../../common/FieldValueToString';
 import CustomTreeItem from '../Schemamanager/CustomTreeItem';
@@ -43,7 +44,19 @@ export interface SchemaFieldTreeItem {
   isChildSchema?: boolean;
   /** サブスキーマのパス */
   subSchemaPath?: string;
+  /** プリセットの固定項目（初回治療開始日・診断・進行期）の値の元になる項目かどうか（選択不可として表示する） */
+  isFixedField?: boolean;
 }
+
+/**
+ * プリセットの固定項目の値の元になる項目かどうかを、項目の jesgo:tag で判定する
+ * 項目名では判定しない（固定項目と同じ名前の別の項目を選べなくしないため）
+ * @param fieldSchema 項目のスキーマ
+ */
+const isFixedFieldSource = (fieldSchema: JSONSchema7): boolean => {
+  const tag: unknown = (fieldSchema as Record<string, unknown>)[ConstCommon.JESGO_TAG.PREFIX];
+  return typeof tag === 'string' && ConstCommon.FIXED_FIELD_SOURCE_TAGS.includes(tag);
+};
 
 /**
  * スキーマフィールドツリーのProps
@@ -724,25 +737,31 @@ const generateTreeItems = (
         });
       } else {
         // 配列の要素がプリミティブ型の場合
+        // プリミティブ配列は選択可能（固定項目の値の元になる項目は選択不可）
+        const isFixedField = isFixedFieldSource(typedFieldSchema);
         items.push({
           id: currentPath,
           label: key,
           path: currentPath,
           schemaPath: parentSchemaPath,
           propertyPath: targetPrpertyPath,
-          selectable: true, // プリミティブ配列は選択可能
+          selectable: !isFixedField,
+          isFixedField,
           fieldInfo,
         });
       }
     } else {
       // 通常のフィールド（終端項目）
+      // 終端項目は選択可能（固定項目の値の元になる項目は選択不可）
+      const isFixedField = isFixedFieldSource(typedFieldSchema);
       items.push({
         id: currentPath,
         label: key,
         path: currentPath,
         schemaPath: parentSchemaPath,
         propertyPath: targetPrpertyPath,
-        selectable: true, // 終端項目は選択可能
+        selectable: !isFixedField,
+        isFixedField,
         fieldInfo,
       });
     }
@@ -864,6 +883,18 @@ const renderTreeItem = (
           選択可能
         </Typography>
       )}
+      {item.isFixedField === true && (
+        <Typography
+          variant="caption"
+          style={{
+            fontSize: '10px',
+            color: '#666',
+            fontStyle: 'italic',
+          }}
+        >
+          固定項目のため選択不可
+        </Typography>
+      )}
     </Box>
   );
 
@@ -885,6 +916,30 @@ const renderTreeItem = (
 };
 
 /**
+ * 折りたたんだ状態で展開しておくノードのID
+ * 最上段の「スキーマフィールド」だけを開き、最上位の項目・サブスキーマ・子スキーマだけが見える状態にする
+ * （「折りたたみ」ボタンを押した後と、選択中の項目が無いときの初期表示で共通に使う）
+ */
+const COLLAPSED_EXPANDED_IDS: readonly string[] = ['root'];
+
+/**
+ * 選択中の項目へのスクロールをやり直す間隔（ミリ秒）と最大回数
+ * 枝を開く動きの途中で中身の高さが足りず、目的の位置までスクロールできなかった場合に使う（最大でおよそ 3 秒）
+ */
+const SCROLL_RETRY_INTERVAL_MS = 100;
+const SCROLL_RETRY_MAX = 30;
+
+/**
+ * 組み立てたツリーアイテムと、組み立ての元にしたスキーマ
+ */
+type LoadedTree = {
+  schema: JSONSchema7 | null;
+  items: SchemaFieldTreeItem[];
+};
+const EMPTY_TREE_ITEMS: SchemaFieldTreeItem[] = [];
+const EMPTY_LOADED_TREE: LoadedTree = { schema: null, items: EMPTY_TREE_ITEMS };
+
+/**
  * スキーマフィールドツリーコンポーネント
  */
 const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
@@ -894,8 +949,14 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
   schemaInfo,
   onSelectableFieldsReady,
 }) => {
-  const [treeItems, setTreeItems] = useState<SchemaFieldTreeItem[]>([]);
+  // 組み立てたツリーアイテムと、それを組み立てた元のスキーマを 1 つの状態で持つ
+  // （別々の状態にすると、更新の途中で「新しいスキーマ」と「古いツリー」の組み合わせで描画され得るため）
+  const [loadedTree, setLoadedTree] = useState<LoadedTree>(EMPTY_LOADED_TREE);
   const [isLoading, setIsLoading] = useState(false);
+  // 表示中のスキーマから組み立てたツリーが用意できているか
+  // 用意できていない間（スキーマを選んだ・選び直した直後など）は、前のスキーマのツリーを表示・選択させない
+  const isTreeReady = !schema || loadedTree.schema === schema;
+  const treeItems = isTreeReady ? loadedTree.items : EMPTY_TREE_ITEMS;
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['root']));
   // コールバックをrefで保持して、依存配列から除外する
   const onSelectableFieldsReadyRef = useRef(onSelectableFieldsReady);
@@ -935,7 +996,7 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
 
   // すべて閉じる処理
   const handleCollapseAll = useCallback(() => {
-    setExpandedItems(new Set(['root']));
+    setExpandedItems(new Set(COLLAPSED_EXPANDED_IDS));
   }, []);
 
   // 選択されたパスまでの親ノードを展開する関数
@@ -952,7 +1013,9 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
         
         // 選択されたパスが現在のアイテムのパスで始まる場合は子を探索
         // 例: targetPath = "radiotherapy.dose" で item.path = "radiotherapy" の場合
-        if (targetPath.startsWith(item.path + '.')) {
+        // 配列の要素の子は「親のパス[0].項目」の形になるため、「親のパス[」で始まる場合も子として探索する
+        // 例: targetPath = "術者[0].名前" で item.path = "術者" の場合
+        if (targetPath.startsWith(item.path + '.') || targetPath.startsWith(`${item.path}[`)) {
           // 親ノードとして展開
           expandedIds.push(item.id);
           if (item.children && item.children.length > 0) {
@@ -972,6 +1035,9 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
   }, []);
 
   useEffect(() => {
+    // スキーマが切り替わった後に、前のスキーマの組み立て（非同期）が遅れて終わっても、
+    // その結果で表示中のツリーを上書きしないようにする
+    let cancelled = false;
     const loadTreeItems = async () => {
       if (schema) {
         setIsLoading(true);
@@ -1032,19 +1098,28 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
             allItems = [...allItems, ...childSchemaItems];
           }
 
-          setTreeItems(allItems);
+          if (!cancelled) {
+            setLoadedTree({ schema, items: allItems });
+          }
         } catch (error) {
           console.error('ツリーアイテムの生成に失敗しました:', error);
           // エラーが発生した場合は通常のアイテムのみ表示
-          const regularItems = generateTreeItems(schema, '', [schemaInfo?.schema_id!], []);
-          setTreeItems(regularItems);
+          if (!cancelled) {
+            const regularItems = generateTreeItems(schema, '', [schemaInfo?.schema_id!], []);
+            setLoadedTree({ schema, items: regularItems });
+          }
         } finally {
-          setIsLoading(false);
+          if (!cancelled) {
+            setIsLoading(false);
+          }
         }
       }
     };
 
     loadTreeItems();
+    return () => {
+      cancelled = true;
+    };
   }, [schema, schemaInfo]);
 
   // 選択可能な全項目を取得する関数
@@ -1069,24 +1144,18 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
     return selectableFields;
   }, []);
 
-  // ツリーアイテムが変更されたら、すべて展開状態にする
+  // ツリーアイテムが変更されたら（スキーマを選んだ・選び直したとき）、または選択中の項目が変わったら、初期の開閉状態を決める
+  // ツリーが長く見づらくならないよう、すべて展開ではなく折りたたんだ状態を基本とする
   useEffect(() => {
     if (treeItems.length > 0) {
-      // 選択されたパスがある場合は、そのパスまでの親ノードを展開
-      if (selectedFieldPath) {
-        const expandedIds = getExpandedIdsForPath(treeItems, selectedFieldPath);
-        // 選択されたパスが見つかった場合は展開、見つからない場合はすべて展開
-        if (expandedIds.length > 1) {
-          setExpandedItems(new Set(expandedIds));
-        } else {
-          // パスが見つからない場合は、すべて展開
-          const allIds = getAllItemIds(treeItems);
-          setExpandedItems(new Set(allIds));
-        }
+      // 選択されたパスがある場合は、そのパスまでの親ノードだけを展開する（既存の項目の編集時）
+      const expandedIds = selectedFieldPath ? getExpandedIdsForPath(treeItems, selectedFieldPath) : [];
+      if (expandedIds.length > 1) {
+        setExpandedItems(new Set(expandedIds));
       } else {
-        // 選択されたパスがない場合は、すべて展開
-        const allIds = getAllItemIds(treeItems);
-        setExpandedItems(new Set(allIds));
+        // 選択されたパスが無い、またはツリー内に見つからない場合は、
+        // 「折りたたみ」ボタンと同じ状態（最上位の項目・サブスキーマ・子スキーマだけが見える状態）にする
+        setExpandedItems(new Set(COLLAPSED_EXPANDED_IDS));
       }
       
       // 選択可能な全項目を取得してコールバックを呼び出す
@@ -1096,23 +1165,25 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
         onSelectableFieldsReadyRef.current(selectableFields);
       }
     }
-  }, [treeItems, getAllItemIds, getSelectableFields, selectedFieldPath, getExpandedIdsForPath]);
+  }, [treeItems, getSelectableFields, selectedFieldPath, getExpandedIdsForPath]);
 
   // 選択されたパスが変更されたときに、その要素までスクロールする
   useEffect(() => {
     if (selectedFieldPath && scrollContainerRef.current) {
-      // DOMが更新されるのを待つ
-      const timeoutId = setTimeout(() => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      let retryCount = 0;
+
+      const scrollToSelected = () => {
         // 選択されたパスに対応する要素を検索
         const selectedElement = scrollContainerRef.current?.querySelector(
           `[data-field-path="${selectedFieldPath}"]`
         ) as HTMLElement;
-        
+
         if (selectedElement && scrollContainerRef.current) {
           // 要素の位置を取得
           const elementRect = selectedElement.getBoundingClientRect();
           const containerRect = scrollContainerRef.current.getBoundingClientRect();
-          
+
           // 要素がコンテナの表示範囲外にある場合はスクロール
           if (
             elementRect.top < containerRect.top ||
@@ -1125,20 +1196,32 @@ const SchemaFieldTree: React.FC<SchemaFieldTreeProps> = ({
               containerRect.top -
               (containerRect.height / 2) +
               (elementRect.height / 2);
-            
+
             scrollContainerRef.current.scrollTo({
               top: scrollTop,
               behavior: 'smooth',
             });
+
+            // 枝を開く動き（アニメーション）の途中は中身の高さが伸びきっておらず、
+            // 目的の位置までスクロールできないことがある。その場合は少し待ってからやり直す
+            const maxScrollTop =
+              scrollContainerRef.current.scrollHeight - scrollContainerRef.current.clientHeight;
+            if (scrollTop > maxScrollTop && retryCount < SCROLL_RETRY_MAX) {
+              retryCount += 1;
+              timeoutId = setTimeout(scrollToSelected, SCROLL_RETRY_INTERVAL_MS);
+            }
           }
         }
-      }, 100); // DOM更新を待つための短い遅延
-      
+      };
+
+      // DOMが更新されるのを待つ
+      timeoutId = setTimeout(scrollToSelected, 100); // DOM更新を待つための短い遅延
+
       return () => clearTimeout(timeoutId);
     }
   }, [selectedFieldPath, expandedItems]);
 
-  if (isLoading) {
+  if (isLoading || !isTreeReady) {
     return (
       <div style={{ 
         padding: '20px', 

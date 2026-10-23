@@ -84,7 +84,6 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
   const [availableSchemas, setAvailableSchemas] = useState<treeSchema[]>([]);
   const [availableCommonSchemas, setAvailableCommonSchemas] = useState<treeSchema[]>([]);
   const [selectedSchemaId, setSelectedSchemaId] = useState<number | null>(null);
-  const [selectedSchemaInfo, setSelectedSchemaInfo] = useState<JesgoDocumentSchema | null>(null);
   const [selectedFieldPath, setSelectedFieldPath] = useState<string>('');
   // 選択可能な全項目を保持
   const [selectableFields, setSelectableFields] = useState<Array<{ path: string; fieldInfo: FieldInfo }>>([]);
@@ -255,9 +254,13 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
       
       // 既存の項目（データベースから取得）を優先して使用
       // 既存項目が空の場合は、固定項目を使用
+      // 行を見分ける番号（field_id）が無い行（「コピー」で引き継いだ行など）には一時的な番号を振る
+      // 「選択」「削除」、表示・CSV 出力の切り替えなどは field_id で行を見分けるため、無いと働かない・他の行にも効いてしまう
+      // 負の値にして、登録済みの行の番号や「+ 追加」の一時的な番号と重ならないようにする（保存時に field_id は使われない）
       const mergedFields = existingFields.length > 0 
-        ? existingFields.map(field => ({
+        ? existingFields.map((field, index) => ({
             ...field,
+            field_id: field.field_id ?? -(index + 1),
             is_csv_header_display_name: field.is_csv_header_display_name !== undefined ? field.is_csv_header_display_name : false
           }))
         : [...fixedFields];
@@ -375,15 +378,14 @@ const PresetEditModal: React.FC<PresetEditModalProps> = ({
     };
   }, [show]); // showが変わるたびに再計算
 
-  // 選択されたスキーマIDが変更されたときにスキーマ情報を取得
-  useEffect(() => {
-    if (selectedSchemaId !== null) {
-      const schemaInfo = GetSchemaInfo(selectedSchemaId);
-      setSelectedSchemaInfo(schemaInfo || null);
-    } else {
-      setSelectedSchemaInfo(null);
-    }
-  }, [selectedSchemaId]);
+  // 選択されたスキーマIDからスキーマ情報を求める
+  // スキーマ選択の欄と、ツリーに渡すスキーマと、項目を選んだときに行へ設定するスキーマが
+  // 常に同じになるよう、描画のたびに選択中のスキーマIDから同期的に求める
+  // （副作用で後から反映すると、直前のスキーマのまま描画される瞬間が生じる）
+  const selectedSchemaInfo = useMemo<JesgoDocumentSchema | null>(
+    () => (selectedSchemaId !== null ? GetSchemaInfo(selectedSchemaId) || null : null),
+    [selectedSchemaId]
+  );
 
   // フィールドの追加
   const addField = () => {
