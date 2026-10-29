@@ -8,7 +8,7 @@ import {
 } from '../../common/CaseRegistrationUtility';
 import {
   executePlugin,
-  executePluginWithTimeout,
+  executePluginIgnoringCancel,
   jesgoPluginColumns,
   PrepareListTargetFunction,
   runPatientListOutputPlugin,
@@ -112,7 +112,7 @@ const PluginButton = (props: {
       // eslint-disable-next-line no-restricted-globals
       confirm('編集中のデータがありますが、破棄してプラグインを実行しますか？')
     ) {
-      await executePluginWithTimeout(
+      await executePluginIgnoringCancel(
         plugin,
         () =>
           executePlugin(

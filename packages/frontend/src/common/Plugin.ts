@@ -1012,6 +1012,45 @@ export const executePluginWithTimeout = async (
 };
 
 /**
+ * 利用者による取り消し・時間切れによる中断か否か
+ * （患者情報の確認でのキャンセル〔Error('cancel')〕、ファイル選択の取り消し〔値なしの reject〕、
+ *   時間切れ〔'timeout'。executePluginWithTimeout で通知済み〕）
+ * @param err 受け取った例外
+ * @returns 取り消し・時間切れであれば true
+ */
+export const isPluginCancelled = (err: unknown): boolean =>
+  err === undefined ||
+  err === 'timeout' ||
+  (err instanceof Error && err.message === 'cancel');
+
+/**
+ * プラグインをタイムアウト付きで実行し、利用者による取り消し・時間切れは呼び出し元へ伝えない
+ * （症例画面のプラグイン選択・タブのメニュー・プラグイングループのダイアログ用。
+ *   取り消し・時間切れは何も表示しない〔時間切れは executePluginWithTimeout で通知済み〕。
+ *   それ以外の例外は従来どおり呼び出し元へ伝える）
+ * @param plugin プラグイン情報
+ * @param executeFn 実行する関数
+ * @param setIsLoading ローディング状態を設定する関数
+ * @returns 実行を終えた場合は true、取り消し・時間切れの場合は false
+ */
+export const executePluginIgnoringCancel = async (
+  plugin: jesgoPluginColumns,
+  executeFn: () => Promise<unknown>,
+  setIsLoading?: React.Dispatch<React.SetStateAction<boolean>>
+): Promise<boolean> => {
+  try {
+    await executePluginWithTimeout(plugin, executeFn, setIsLoading);
+    return true;
+  } catch (e) {
+    if (isPluginCancelled(e)) {
+      // 取り消し・時間切れは利用者の操作または通知済みのため、何も表示しない
+      return false;
+    }
+    throw e;
+  }
+};
+
+/**
  * プラグイン実行
  * @param plugin
  * @param patientList
