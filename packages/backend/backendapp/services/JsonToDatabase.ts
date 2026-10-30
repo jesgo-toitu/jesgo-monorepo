@@ -1170,7 +1170,8 @@ const updateRootSchemaList = async () => {
 
 /** JSONSchema7のkeyと値を全て取得 */
 export const getItemsAndNames = (item: JSONSchema7) => {
-  logging(LOGTYPE.DEBUG, `呼び出し`, 'JsonToDatabase', 'getItemsAndNames');
+  // スキーマを再帰でたどる処理（患者リストの getPropertyNameFromTag など）から大量に呼ばれるため、
+  // 呼び出しのたびにはログを出さない
   if (item === null) return { pItems: {}, pNames: [] } as schemaItem;
   const result: schemaItem = {
     pItems: item as { [key: string]: JSONSchema7Definition },

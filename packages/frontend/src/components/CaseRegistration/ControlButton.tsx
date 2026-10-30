@@ -17,7 +17,7 @@ import { Const } from '../../common/Const';
 import { GetRootSchema, GetSchemaInfo } from './SchemaUtility';
 import {
   executePlugin,
-  executePluginWithTimeout,
+  executePluginIgnoringCancel,
   jesgoPluginColumns,
 } from '../../common/Plugin';
 import apiAccess, { METHOD_TYPE, RESULT } from '../../common/ApiAccess';
@@ -365,7 +365,7 @@ export const ControlButton = React.memo((props: ControlButtonProps) => {
         case eventKey.startsWith('plugin_') && eventKey: {
           const f = async () => {
             if (plugin) {
-              await executePluginWithTimeout(
+              await executePluginIgnoringCancel(
                 plugin,
                 () =>
                   executePlugin(

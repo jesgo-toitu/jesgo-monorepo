@@ -15,8 +15,10 @@ import ModalDialog from '../common/ModalDialog';
 import './PluginModal.css';
 import {
   executePlugin,
-  executePluginWithTimeout,
+  executePluginIgnoringCancel,
   jesgoPluginColumns,
+  PrepareListTargetFunction,
+  runPatientListOutputPlugin,
 } from '../../common/Plugin';
 import { jesgoCaseDefine } from '../../store/formDataReducer';
 import { reloadState } from '../../views/Registration';
@@ -49,8 +51,10 @@ export const PluginModalDialog = (props: {
   getTargetFunction: () => jesgoCaseDefine[];
   setIsLoading: (value: React.SetStateAction<boolean>) => void;
   setReload: (value: React.SetStateAction<reloadState>) => void;
+  // 患者リストから実行する出力系プラグインの対象症例を決める関数（患者リストのときだけ渡す）
+  prepareListTarget: PrepareListTargetFunction | undefined;
 }) => {
-  const { onHide, onOk, onCancel, show, title, pluginTitle, pageType, pluginList, getTargetFunction, setIsLoading, setReload } = props;
+  const { onHide, onOk, onCancel, show, title, pluginTitle, pageType, pluginList, getTargetFunction, setIsLoading, setReload, prepareListTarget } = props;
   const [targetPlugins, setTargetPlugins] = useState<jesgoPluginColumns[]>([]);
   const [targetPlugin, setTargetPlugin] = useState<jesgoPluginColumns>();
 
@@ -121,13 +125,31 @@ export const PluginModalDialog = (props: {
       return;
     }
 
+    // 患者リストから実行する出力系プラグインは、一覧の全件を対象にする
+    // （一括更新系・新規登録系の対象は変えない）
+    if (
+      pageType === PAGE_TYPE.PATIENT_LIST &&
+      !targetPlugin.update_db &&
+      prepareListTarget
+    ) {
+      await runPatientListOutputPlugin(
+        targetPlugin,
+        prepareListTarget,
+        setIsLoading,
+        setReload,
+        setOverwriteDialogPlop
+      );
+      onOk();
+      return;
+    }
+
     if (
       pageType === PAGE_TYPE.PATIENT_LIST ||
       IsNotUpdate() ||
       // eslint-disable-next-line no-restricted-globals
       confirm('編集中のデータがありますが、破棄してプラグインを実行しますか？')
     ) {
-      await executePluginWithTimeout(
+      await executePluginIgnoringCancel(
         targetPlugin as jesgoPluginColumns,
         () =>
           executePlugin(

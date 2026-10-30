@@ -58,6 +58,18 @@ import {
   reconcileViewStateWithPreset,
   savePatientListViewState,
 } from '../common/PatientListViewState';
+import {
+  PatientListFetchRequest,
+  PatientListTargetSource,
+  PluginTargetCollectResult,
+  PresetRowForTarget,
+  buildTargetConfirmMessage,
+  collectCasesFromRows,
+  createListFetchRequest,
+  fetchAllListCases,
+  getUnavailableMessage,
+  PLUGIN_TARGET_MESSAGES,
+} from '../common/PatientListPluginTarget';
 
 const UNIT_TYPE = {
   DAY: 0,
@@ -282,6 +294,35 @@ const Patients = () => {
   const pageCheckAfterRestoreRef = useRef<boolean>(
     !!restoredViewState && restoredViewState.currentPage > 1
   );
+  // 患者リストから実行する出力系プラグインの対象を決めるための、一覧の状態
+  // （表示中の一覧の取得に実際に使った要求。読み込み前・取得失敗のときは対象を作らない）
+  const listTargetSourceRef = useRef<PatientListTargetSource>({
+    status: 'none',
+  });
+  // 一覧の取得の通し番号（後から始めた取得の結果だけを記録するため）
+  const listFetchSeqRef = useRef<number>(0);
+
+  /**
+   * 一覧の取得を始めたことを記録する（取得が終わるまで、プラグインの対象を作らない）
+   * @returns この取得の通し番号
+   */
+  const beginListFetch = (): number => {
+    listFetchSeqRef.current += 1;
+    listTargetSourceRef.current = { status: 'loading' };
+    return listFetchSeqRef.current;
+  };
+
+  /**
+   * 一覧の取得が終わったことを記録する（後から別の取得を始めていた場合は記録しない）
+   * @param seq beginListFetch で受け取った通し番号
+   * @param request 一覧の取得に使った要求。取得に失敗した場合は null
+   */
+  const endListFetch = (seq: number, request: PatientListFetchRequest | null) => {
+    if (seq !== listFetchSeqRef.current) return;
+    listTargetSourceRef.current = request
+      ? { status: 'loaded', request }
+      : { status: 'failed' };
+  };
 
   const dispatch = useDispatch();
 
@@ -452,6 +493,8 @@ const Patients = () => {
 
     // 一覧の取得に使う条件を記録
     recordAppliedViewState(isDetailMode, query, filterConditions.length);
+    // プラグインの対象を決めるための記録（取得が終わるまで対象を作らない）
+    const fetchSeq = beginListFetch();
 
     // プリセット項目の絞り込み条件がある場合はPOSTリクエストで送信
     if (filterConditions.length > 0) {
@@ -483,14 +526,26 @@ const Patients = () => {
           // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
           applyTotalCount(responseBody.data?.length || 0);
         }
+        endListFetch(
+          fetchSeq,
+          createListFetchRequest(
+            'POST',
+            urlParams,
+            requestBody,
+            query,
+            filterConditions.length,
+            false
+          )
+        );
       } else {
+        endListFetch(fetchSeq, null);
         navigate('/login');
       }
     } else {
       // プリセット項目の絞り込み条件がない場合はGETリクエストで送信
       const queryString = urlParams.toString();
       const apiUrl = queryString ? `patientlist?${queryString}` : 'patientlist';
-      
+
       // 患者情報取得APIを呼ぶ
       const returnApiObject = await apiAccess(
         METHOD_TYPE.GET,
@@ -507,15 +562,27 @@ const Patients = () => {
           // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
           applyTotalCount(responseBody.data?.length || 0);
         }
+        endListFetch(
+          fetchSeq,
+          createListFetchRequest('GET', urlParams, null, query, 0, false)
+        );
       } else {
+        endListFetch(fetchSeq, null);
         navigate('/login');
       }
     }
   };
 
-  // 患者情報再読み込み
+  // 患者情報再読み込み（一括更新系のプラグインの実行後など）
   useEffect(() => {
     const f = async () => {
+      // プリセット表示では、表示中の一覧と同じ取得方法で取り直す
+      // （別の取得方法で取り直すと、画面の一覧と、件数表示・プラグインの対象の元になる一覧が食い違うため）
+      if (selectedPresetId && selectedPresetDetail) {
+        await loadPresetPatientList();
+        return;
+      }
+
       setIsLoading(true);
 
       // 患者情報の取得を行う
@@ -1204,6 +1271,8 @@ const Patients = () => {
   };
 
   // 現在表示されている患者リストの一覧をJesgoCaseDefineとして返す
+  // （一括更新系・新規登録系のプラグインに渡す。これらは対象の決め方を変えていない。
+  //   出力系のプラグインの対象は preparePluginTarget で一覧の全件から決める）
   const getPatientList = () => {
     // userListJsonが空または無効な場合は空の配列を返す
     if (!userListJson || userListJson.trim() === '') {
@@ -1242,6 +1311,71 @@ const Patients = () => {
       alert('患者リストの取得に失敗しました。ページを再読み込みしてください。');
       return [];
     }
+  };
+
+  /**
+   * 患者リストから実行する出力系プラグインの対象症例を決める
+   * 対象は、実行した時点の一覧の取得に実際に使った検索・絞り込みの条件に合う全件
+   * （表示中のページ・表示件数に関係なく、並び順は一覧と同じ）。
+   * 一覧が読み込み前・取得失敗・0 件のときは、知らせて実行しない。
+   * 実行する場合は、対象の件数（絞り込み中ならその旨）を示して確認する
+   * @param plugin 実行するプラグイン
+   * @returns プラグインへ渡す症例。実行しない場合は undefined
+   */
+  const preparePluginTarget = async (
+    plugin: jesgoPluginColumns
+  ): Promise<jesgoCaseDefine[] | undefined> => {
+    const source = listTargetSourceRef.current;
+    if (source.status !== 'loaded') {
+      // eslint-disable-next-line no-alert
+      alert(getUnavailableMessage(source));
+      return undefined;
+    }
+    const { request } = source;
+
+    let result: PluginTargetCollectResult;
+    if (request.useDisplayedRows) {
+      // カスタムプリセットの患者リスト表示: 画面が持っている一覧の全件の行から作る
+      result = {
+        ok: true,
+        cases: collectCasesFromRows(presetPatientData as PresetRowForTarget[]),
+      };
+    } else {
+      // 一覧の取得に使った要求と同じ条件・並び順で、全件を取り直す
+      // （一覧の中身は画面に持ち続けず、実行のたびに取得する）
+      setIsLoading(true);
+      try {
+        result = await fetchAllListCases(request, apiAccess);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    if (!result.ok) {
+      // eslint-disable-next-line no-alert
+      alert(`${result.message}\n${PLUGIN_TARGET_MESSAGES.NO_TARGET}`);
+      return undefined;
+    }
+    if (result.cases.length === 0) {
+      // eslint-disable-next-line no-alert
+      alert(PLUGIN_TARGET_MESSAGES.NO_TARGET);
+      return undefined;
+    }
+
+    // 実行前に、対象の件数（絞り込み中ならその旨）を示して確認する
+    // 出力結果に患者情報が含まれるプラグインでは、患者情報の確認もこの 1 つの確認にまとめる
+    // eslint-disable-next-line no-restricted-globals, no-alert
+    const confirmed = confirm(
+      buildTargetConfirmMessage(
+        plugin.plugin_name,
+        result.cases.length,
+        request.filterLabels,
+        totalCount,
+        request.useDisplayedRows,
+        plugin.attach_patient_info
+      )
+    );
+    return confirmed ? result.cases : undefined;
   };
 
   /**
@@ -1593,9 +1727,11 @@ const Patients = () => {
         urlParams.set('sortColumn', sortColumn);
         urlParams.set('sortDirection', sortDirection);
       }
-      
+
       setIsLoading(true);
-      
+      // プラグインの対象を決めるための記録（取得が終わるまで対象を作らない）
+      const fetchSeq = beginListFetch();
+
       try {
         // 通常表示と同じようにGETリクエストで送信（プリセット項目のフィルタリング条件は使用しない）
         const queryString = urlParams.toString();
@@ -1603,7 +1739,7 @@ const Patients = () => {
           METHOD_TYPE.GET,
           `patientlist?${queryString}`
         );
-        
+
         if (returnApiObject.statusNum === RESULT.NORMAL_TERMINATION) {
           const responseBody = returnApiObject.body as { data: userData[]; totalCount?: number };
           setUserListJson(JSON.stringify(responseBody));
@@ -1614,10 +1750,16 @@ const Patients = () => {
             // totalCountが返されていない場合は、dataの長さを使用（フォールバック）
             applyTotalCount(responseBody.data?.length || 0);
           }
+          endListFetch(
+            fetchSeq,
+            createListFetchRequest('GET', urlParams, null, query, 0, false)
+          );
         } else {
+          endListFetch(fetchSeq, null);
           navigate('/login');
         }
       } catch (error) {
+        endListFetch(fetchSeq, null);
         console.error('プリセット患者リスト取得エラー:', error);
       } finally {
         setIsLoading(false);
@@ -1627,6 +1769,14 @@ const Patients = () => {
     
     // 「患者リスト表示」の場合は、プリセットのフィールド定義に基づいて表示
     setIsLoading(true);
+    // プラグインの対象を決めるための記録（取得が終わるまで対象を作らない）
+    const fetchSeq = beginListFetch();
+    // カスタムプリセットは一覧 API がページを切らずに全件を返し、画面が全件の行を持つため、
+    // プラグインの対象は表示中の行（全件）から作る
+    const useDisplayedRows = Number(selectedPresetId) > 1;
+    // 一覧の取得と行の作成がすべて成功したときに、取得に使った要求を入れる
+    let listRequest: PatientListFetchRequest | null = null;
+    let documentsFetched = true;
     try {
       // プリセット項目の絞り込み条件をリクエストボディで送信
       const filterConditions: any[] = [];
@@ -1660,8 +1810,9 @@ const Patients = () => {
       
       // 患者リスト表示用のフィルタリング条件でURLパラメータを生成
       const urlParams = buildSearchParams(false);
+      const query = urlParams.toString();
       // 一覧の取得に使う条件を記録
-      recordAppliedViewState(false, urlParams.toString(), filterConditions.length);
+      recordAppliedViewState(false, query, filterConditions.length);
 
       const isCsvExport = false;
       
@@ -1675,10 +1826,18 @@ const Patients = () => {
           presetId: selectedPresetId || undefined,
           presetFilters: filterConditions,
         };
-        
+
         const queryString = urlParams.toString();
         const apiUrl = queryString ? `/patientlist?${queryString}` : '/patientlist';
         const patientsResult = await apiAccess(METHOD_TYPE.POST, apiUrl, requestBody);
+        const fetchRequest = createListFetchRequest(
+          'POST',
+          urlParams,
+          requestBody,
+          query,
+          filterConditions.length,
+          useDisplayedRows
+        );
         
         if (patientsResult.statusNum === RESULT.NORMAL_TERMINATION) {
           const responseData = patientsResult.body as any;
@@ -1742,6 +1901,8 @@ const Patients = () => {
             }
           } else {
             console.error('loadPresetPatientList: ドキュメント取得失敗', { statusNum: documentsResult.statusNum, body: documentsResult.body });
+            // 一覧の行が正しく作れていないため、プラグインの対象を作らない
+            documentsFetched = false;
             // ドキュメント取得に失敗した場合でも、患者リストだけでも表示できるように空のマップを使用
           }
           
@@ -1783,6 +1944,7 @@ const Patients = () => {
             applyTotalCount(formattedData.length);
           }
           setPresetPatientData(formattedData);
+          if (documentsFetched) listRequest = fetchRequest;
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
         }
@@ -1798,10 +1960,18 @@ const Patients = () => {
         if (selectedPresetId) {
           urlParams.set('presetId', selectedPresetId);
         }
-        
+
         const queryString = urlParams.toString();
         const apiUrl = queryString ? `/patientlist?${queryString}` : '/patientlist';
         const patientsResult = await apiAccess(METHOD_TYPE.GET, apiUrl);
+        const fetchRequest = createListFetchRequest(
+          'GET',
+          urlParams,
+          null,
+          query,
+          0,
+          useDisplayedRows
+        );
         
         if (patientsResult.statusNum === RESULT.NORMAL_TERMINATION) {
           const responseData = patientsResult.body as any;
@@ -1861,6 +2031,8 @@ const Patients = () => {
             }
           } else {
             console.error('loadPresetPatientList: ドキュメント取得失敗', { statusNum: documentsResult.statusNum, body: documentsResult.body });
+            // 一覧の行が正しく作れていないため、プラグインの対象を作らない
+            documentsFetched = false;
             // ドキュメント取得に失敗した場合でも、患者リストだけでも表示できるように空のマップを使用
           }
           
@@ -1902,6 +2074,7 @@ const Patients = () => {
             applyTotalCount(formattedData.length);
           }
           setPresetPatientData(formattedData);
+          if (documentsFetched) listRequest = fetchRequest;
         } else {
           console.error('loadPresetPatientList: API呼び出し失敗', { statusNum: patientsResult.statusNum, body: patientsResult.body });
         }
@@ -1909,6 +2082,8 @@ const Patients = () => {
     } catch (error) {
       console.error('プリセット患者リスト取得エラー:', error);
     } finally {
+      // 取得に失敗した場合（API の失敗・行の作成の失敗・例外）は、プラグインの対象を作らない
+      endListFetch(fetchSeq, listRequest);
       setIsLoading(false);
     }
   };
@@ -2043,6 +2218,7 @@ const Patients = () => {
               getTargetFunction={getPatientList}
               setIsLoading={setIsLoading}
               setReload={setReload}
+              prepareListTarget={preparePluginTarget}
             />
             <div className="spacer10" />
             {localStorage.getItem('is_add_roll') === 'true' && (

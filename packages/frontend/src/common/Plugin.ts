@@ -26,6 +26,7 @@ import {
 } from './CommonUtility';
 import { GetPackagedDocument } from './DBUtility';
 import { Const } from './Const';
+import { PLUGIN_TARGET_MESSAGES } from './PatientListPluginTarget';
 
 window.Buffer = Buffer;
 
@@ -79,6 +80,15 @@ let setOverwriteDialogPlopGlobal:
 let setIsLoadingGlobal:
   | React.Dispatch<React.SetStateAction<boolean>>
   | undefined;
+// プラグインの実行中に、症例の文書の取得に失敗したか
+// （患者リストから実行した出力系プラグインで、一部の症例だけの出力を正常な出力として見せないため）
+let packagedDocumentFailed = false;
+
+/**
+ * 症例の文書を一度に取得する症例の件数の上限
+ * サーバが受け付ける要求の大きさには上限（1MB）があるため、件数が多い場合は分けて取得する
+ */
+export const PACKAGED_DOCUMENT_CHUNK_SIZE = 10000;
 
 // モジュールのFunc定義インターフェース
 interface IPluginModule {
@@ -137,17 +147,51 @@ const getPatientsDocument = async (doc: argDoc) => {
     doc.targetSchemas && doc.targetSchemas.length > 0
       ? doc.targetSchemas
       : undefined;
-  const ret = await GetPackagedDocument(
-    doc.caseList,
-    schemaIds,
-    undefined,
-    doc.filterQuery,
-    pluginData.attach_patient_info
-  );
-  if (ret.resCode === RESULT.NORMAL_TERMINATION) {
-    return ret.anyValue ? JSON.stringify(ret.anyValue) : undefined;
+  // サーバは症例の番号（case_id）だけを使うため、番号だけを送る
+  // （症例の件数が多くても、サーバが受け付ける要求の大きさの上限を超えないようにするため）
+  // 症例の一覧が配列でない場合（プラグインの渡し方の誤り）は、従来どおりそのまま送る
+  const caseIdList = Array.isArray(doc.caseList)
+    ? doc.caseList.map((p) => ({ case_id: p.case_id }))
+    : doc.caseList;
+  if (
+    !Array.isArray(caseIdList) ||
+    caseIdList.length <= PACKAGED_DOCUMENT_CHUNK_SIZE
+  ) {
+    const ret = await GetPackagedDocument(
+      caseIdList,
+      schemaIds,
+      undefined,
+      doc.filterQuery,
+      pluginData.attach_patient_info
+    );
+    if (ret.resCode === RESULT.NORMAL_TERMINATION) {
+      return ret.anyValue ? JSON.stringify(ret.anyValue) : undefined;
+    }
+    packagedDocumentFailed = true;
+    return undefined;
   }
-  return undefined;
+
+  // 件数が多い場合は分けて取得し、結果をつなげる（1 回でも失敗したら全体を失敗とする）
+  const results: unknown[] = [];
+  for (
+    let start = 0;
+    start < caseIdList.length;
+    start += PACKAGED_DOCUMENT_CHUNK_SIZE
+  ) {
+    const ret = await GetPackagedDocument(
+      caseIdList.slice(start, start + PACKAGED_DOCUMENT_CHUNK_SIZE),
+      schemaIds,
+      undefined,
+      doc.filterQuery,
+      pluginData.attach_patient_info
+    );
+    if (ret.resCode !== RESULT.NORMAL_TERMINATION || !Array.isArray(ret.anyValue)) {
+      packagedDocumentFailed = true;
+      return undefined;
+    }
+    results.push(...(ret.anyValue as unknown[]));
+  }
+  return JSON.stringify(results);
 };
 
 const getTargetDocument = async (doc: argDoc) => {
@@ -968,6 +1012,45 @@ export const executePluginWithTimeout = async (
 };
 
 /**
+ * 利用者による取り消し・時間切れによる中断か否か
+ * （患者情報の確認でのキャンセル〔Error('cancel')〕、ファイル選択の取り消し〔値なしの reject〕、
+ *   時間切れ〔'timeout'。executePluginWithTimeout で通知済み〕）
+ * @param err 受け取った例外
+ * @returns 取り消し・時間切れであれば true
+ */
+export const isPluginCancelled = (err: unknown): boolean =>
+  err === undefined ||
+  err === 'timeout' ||
+  (err instanceof Error && err.message === 'cancel');
+
+/**
+ * プラグインをタイムアウト付きで実行し、利用者による取り消し・時間切れは呼び出し元へ伝えない
+ * （症例画面のプラグイン選択・タブのメニュー・プラグイングループのダイアログ用。
+ *   取り消し・時間切れは何も表示しない〔時間切れは executePluginWithTimeout で通知済み〕。
+ *   それ以外の例外は従来どおり呼び出し元へ伝える）
+ * @param plugin プラグイン情報
+ * @param executeFn 実行する関数
+ * @param setIsLoading ローディング状態を設定する関数
+ * @returns 実行を終えた場合は true、取り消し・時間切れの場合は false
+ */
+export const executePluginIgnoringCancel = async (
+  plugin: jesgoPluginColumns,
+  executeFn: () => Promise<unknown>,
+  setIsLoading?: React.Dispatch<React.SetStateAction<boolean>>
+): Promise<boolean> => {
+  try {
+    await executePluginWithTimeout(plugin, executeFn, setIsLoading);
+    return true;
+  } catch (e) {
+    if (isPluginCancelled(e)) {
+      // 取り消し・時間切れは利用者の操作または通知済みのため、何も表示しない
+      return false;
+    }
+    throw e;
+  }
+};
+
+/**
  * プラグイン実行
  * @param plugin
  * @param patientList
@@ -975,6 +1058,8 @@ export const executePluginWithTimeout = async (
  * @param setReload
  * @param setIsLoading
  * @param setOverwriteDialogPlop
+ * @param patientInfoConfirmed 患者情報の確認を呼び出し元で済ませている場合は true
+ *   （患者リストからの実行では、実行前の確認に患者情報の確認をまとめているため、ここでは出さない）
  * @returns
  */
 export const executePlugin = async (
@@ -989,54 +1074,25 @@ export const executePlugin = async (
     | undefined = undefined,
   setOverwriteDialogPlop:
     | React.Dispatch<React.SetStateAction<OverwriteDialogPlop | undefined>>
-    | undefined = undefined
+    | undefined = undefined,
+  patientInfoConfirmed = false
 ) => {
   pluginData = plugin;
   setOverwriteDialogPlopGlobal = setOverwriteDialogPlop;
   setIsLoadingGlobal = setIsLoading;
 
-  let copyPatientList = lodash.cloneDeep(patientList);
+  const copyPatientList = lodash.cloneDeep(patientList);
 
-  // 全患者対象のプラグインで、患者リストが空または未定義の場合、全患者を取得
+  // 全患者対象の出力系プラグインで、対象の症例が無い場合は実行しない
+  // （対象は患者リストの一覧の全件から呼び出し元で決める。
+  //   一覧が空・読み込み前・取得失敗のときに、条件を無視した症例を補って渡さないため）
   if (
     plugin.all_patient &&
-    (!copyPatientList || copyPatientList.length === 0) &&
-    !plugin.update_db
+    !plugin.update_db &&
+    (!copyPatientList || copyPatientList.length === 0)
   ) {
-    console.log('[executePlugin] 全患者対象プラグイン: 全患者を取得します');
-    try {
-      const patientsResult = await apiAccess(METHOD_TYPE.GET, '/patientlist');
-      if (patientsResult.statusNum === RESULT.NORMAL_TERMINATION) {
-        const responseData = patientsResult.body as any;
-        if (responseData && responseData.data && Array.isArray(responseData.data)) {
-          copyPatientList = responseData.data.map((patient: any) => {
-            const caseinfo: jesgoCaseDefine = {
-              case_id: (patient.caseId || patient.case_id).toString(),
-              name: patient.patientName || patient.name || '',
-              date_of_birth: patient.date_of_birth || '1900-01-01',
-              date_of_death: patient.date_of_death || '1900-01-01',
-              sex: patient.sex || 'F',
-              his_id: patient.patientId || patient.his_id || '',
-              decline: patient.decline || false,
-              registrant: patient.registrant || -1,
-              last_updated: patient.lastUpdate || patient.last_updated || '1900-01-01',
-              is_new_case: false,
-            };
-            return caseinfo;
-          });
-          console.log(`[executePlugin] 全患者を取得しました: ${copyPatientList.length}件`);
-        } else {
-          console.warn('[executePlugin] 全患者取得: 予期しないAPIレスポンス形式');
-          copyPatientList = [];
-        }
-      } else {
-        console.error('[executePlugin] 全患者取得に失敗しました');
-        copyPatientList = [];
-      }
-    } catch (error) {
-      console.error('[executePlugin] 全患者取得エラー:', error);
-      copyPatientList = [];
-    }
+    alert('対象の症例がありません。');
+    return undefined;
   }
 
   if (plugin.update_db) {
@@ -1138,8 +1194,9 @@ export const executePlugin = async (
     // データ出力系
     if (
       plugin.attach_patient_info &&
+      !patientInfoConfirmed &&
       // eslint-disable-next-line no-restricted-globals, no-alert
-      !confirm('出力結果に患者情報が含まれています、実行しますか？')
+      !confirm(PLUGIN_TARGET_MESSAGES.PATIENT_INFO_CONFIRM)
     ) {
       throw new Error('cancel');
     }
@@ -1201,4 +1258,100 @@ export const executePlugin = async (
     alert('対象患者がいません');
   }
   return undefined;
+};
+
+/** 症例の文書の取得に失敗したため、出力結果を表示しなかったことを表すエラー */
+export const PLUGIN_DOCUMENT_FETCH_FAILED = 'document_fetch_failed';
+
+/**
+ * 患者リストから出力系（全患者対象）のプラグインを実行する
+ * 対象の症例は、呼び出し元が患者リストの一覧の全件から決めて渡す。
+ * 実行中に症例の文書の取得に失敗した場合は、一部の症例だけで作られた出力を正常な出力として見せないため、
+ * 失敗を知らせて例外を投げる（executePluginWithTimeout は例外のときに出力結果の画面を開かない）
+ * @param plugin プラグイン
+ * @param caseList 対象の症例（一覧の全件）
+ * @param setReload
+ * @param setIsLoading
+ * @param setOverwriteDialogPlop
+ */
+export const executePatientListOutputPlugin = async (
+  plugin: jesgoPluginColumns,
+  caseList: jesgoCaseDefine[],
+  setReload:
+    | ((value: React.SetStateAction<reloadState>) => void)
+    | undefined = undefined,
+  setIsLoading:
+    | React.Dispatch<React.SetStateAction<boolean>>
+    | undefined = undefined,
+  setOverwriteDialogPlop:
+    | React.Dispatch<React.SetStateAction<OverwriteDialogPlop | undefined>>
+    | undefined = undefined
+): Promise<unknown> => {
+  packagedDocumentFailed = false;
+  // 患者情報の確認は、実行前の確認（prepareListTarget）にまとめて済ませている
+  const retValue = await executePlugin(
+    plugin,
+    caseList,
+    undefined,
+    setReload,
+    setIsLoading,
+    setOverwriteDialogPlop,
+    true
+  );
+  if (packagedDocumentFailed) {
+    packagedDocumentFailed = false;
+    alert(
+      '【エラー】\n症例の文書の取得に失敗しました。\n一部の症例だけで作られた結果になるおそれがあるため、出力結果は表示しません。\n時間をおいて再度実行してください。'
+    );
+    throw new Error(PLUGIN_DOCUMENT_FETCH_FAILED);
+  }
+  return retValue;
+};
+
+/**
+ * 患者リストから実行する出力系プラグインの対象症例を決める関数
+ * 一覧の全件を集め、実行前の確認を出す。実行しない場合（対象 0 件・取り消し等）は undefined を返す
+ */
+export type PrepareListTargetFunction = (
+  plugin: jesgoPluginColumns
+) => Promise<jesgoCaseDefine[] | undefined>;
+
+/**
+ * 患者リストから出力系プラグインを実行する（プラグイン選択・プラグイングループのダイアログ共通）
+ * 対象は一覧の全件（prepareListTarget で決める）。
+ * 取り消し・時間切れ・失敗はそれぞれ通知済みのため、例外は呼び出し元へ伝えない
+ * @param plugin プラグイン
+ * @param prepareListTarget 対象症例を決める関数
+ * @param setIsLoading
+ * @param setReload
+ * @param setOverwriteDialogPlop
+ */
+export const runPatientListOutputPlugin = async (
+  plugin: jesgoPluginColumns,
+  prepareListTarget: PrepareListTargetFunction,
+  setIsLoading: React.Dispatch<React.SetStateAction<boolean>>,
+  setReload: (value: React.SetStateAction<reloadState>) => void,
+  setOverwriteDialogPlop: React.Dispatch<
+    React.SetStateAction<OverwriteDialogPlop | undefined>
+  >
+): Promise<void> => {
+  const caseList = await prepareListTarget(plugin);
+  if (!caseList || caseList.length === 0) return;
+  try {
+    await executePluginWithTimeout(
+      plugin,
+      () =>
+        executePatientListOutputPlugin(
+          plugin,
+          caseList,
+          setReload,
+          setIsLoading,
+          setOverwriteDialogPlop
+        ),
+      setIsLoading
+    );
+  } catch (e) {
+    // 患者情報の確認での取り消し、時間切れ、文書の取得失敗は、それぞれ通知済み
+    console.warn('プラグインの実行を中断しました:', (e as Error)?.message);
+  }
 };
