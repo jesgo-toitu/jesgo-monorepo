@@ -34,7 +34,7 @@ import { Const } from '../common/Const';
 import Loading from '../components/CaseRegistration/Loading';
 import { storeSchemaInfo } from '../components/CaseRegistration/SchemaUtility';
 import { jesgoCaseDefine } from '../store/formDataReducer';
-import { jesgoPluginColumns } from '../common/Plugin';
+import { jesgoPluginColumns, ListTargetCases } from '../common/Plugin';
 import { PatientListPluginButton } from '../components/common/PluginButton';
 import SearchDateComponent, {
   convertSearchDate,
@@ -1319,12 +1319,15 @@ const Patients = () => {
    * （表示中のページ・表示件数に関係なく、並び順は一覧と同じ）。
    * 一覧が読み込み前・取得失敗・0 件のときは、知らせて実行しない。
    * 実行する場合は、対象の件数（絞り込み中ならその旨）を示して確認する
+   * （ロジカルチェックのプラグインでは確認を出さない: options.confirm = false）
    * @param plugin 実行するプラグイン
+   * @param options confirm が false のときは実行前の確認を出さない
    * @returns プラグインへ渡す症例。実行しない場合は undefined
    */
   const preparePluginTarget = async (
-    plugin: jesgoPluginColumns
-  ): Promise<jesgoCaseDefine[] | undefined> => {
+    plugin: jesgoPluginColumns,
+    options?: { confirm?: boolean; allowAllCases?: boolean }
+  ): Promise<ListTargetCases | undefined> => {
     const source = listTargetSourceRef.current;
     if (source.status !== 'loaded') {
       // eslint-disable-next-line no-alert
@@ -1332,6 +1335,19 @@ const Patients = () => {
       return undefined;
     }
     const { request } = source;
+
+    // 一覧に検索・絞り込みが効いていない（一覧が全症例）場合は、一覧の全件を取り直さない
+    // （ロジカルチェックの実行で指定する。対象は全症例とし、プラグインの実行側で文書の症例数と一覧の件数を確かめる）
+    if (
+      options?.allowAllCases &&
+      !request.useDisplayedRows &&
+      request.filterLabels.length === 0 &&
+      totalCount > 0
+    ) {
+      const allCases: ListTargetCases = [];
+      allCases.allCases = { listTotal: totalCount };
+      return allCases;
+    }
 
     let result: PluginTargetCollectResult;
     if (request.useDisplayedRows) {
@@ -1360,6 +1376,11 @@ const Patients = () => {
       // eslint-disable-next-line no-alert
       alert(PLUGIN_TARGET_MESSAGES.NO_TARGET);
       return undefined;
+    }
+
+    // ロジカルチェックのプラグインは、実行前の確認を出さない（従来どおりすぐにプラグインのダイアログを開く）
+    if (options?.confirm === false) {
+      return result.cases;
     }
 
     // 実行前に、対象の件数（絞り込み中ならその旨）を示して確認する

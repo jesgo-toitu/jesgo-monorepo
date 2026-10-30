@@ -69,6 +69,7 @@ import {
   savePluginList,
   updatePluginExecute,
   uploadPluginZipFile,
+  logPluginOutOfTargetSkipped,
 } from '../services/Plugin';
 import {
   getPresetList,
@@ -1395,6 +1396,21 @@ router.post('/plugin-update', async (req, res, next) => {
     next,
     roll.pluginUpdate,
     req.body
+  );
+});
+
+/**
+ * 患者リストから実行したロジカルチェックのプラグインで、対象外の症例への要求を適用しなかったことを運用ログに残す
+ */
+router.post('/plugin-update-skipped', async (req, res, next) => {
+  await routing(
+    '/plugin-update-skipped',
+    logPluginOutOfTargetSkipped,
+    req,
+    res,
+    next,
+    roll.pluginUpdate,
+    { body: req.body as unknown, userName: getUsernameFromRequest(req) }
   );
 });
 
