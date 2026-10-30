@@ -1446,6 +1446,43 @@ export const updatePluginExecute = async (updateObjects: updateObjects) => {
   }
 };
 
+/**
+ * 患者リストから実行したロジカルチェックのプラグインで、対象外の症例（実行した時点の一覧に含まれない症例）への
+ * 要求を適用しなかったことを運用ログに残す
+ * （患者 ID・氏名・エラー情報の中身は出さない。症例は内部の番号〔case_id〕だけ）
+ * @param arg.body 画面から受け取った件数と症例の内部の番号
+ * @param arg.userName 実行した利用者の表示名（既存のログと同じ範囲）
+ */
+export const logPluginOutOfTargetSkipped = async (arg: {
+  body: unknown;
+  userName: string;
+}): Promise<ApiReturnObject> => {
+  const body = (arg.body ?? {}) as {
+    plugin_id?: unknown;
+    update_count?: unknown;
+    read_count?: unknown;
+    case_ids?: unknown;
+  };
+  const toCount = (v: unknown) =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : 0;
+  const pluginId = toCount(body.plugin_id);
+  const updateCount = toCount(body.update_count);
+  const readCount = toCount(body.read_count);
+  const caseIds = Array.isArray(body.case_ids)
+    ? (body.case_ids as unknown[])
+        .filter((id): id is number => typeof id === 'number' && Number.isInteger(id))
+        .slice(0, 100)
+    : [];
+  logging(
+    LOGTYPE.WARN,
+    `患者リストから実行したプラグイン(plugin_id=${pluginId})が、対象外の症例への要求を返したため適用しませんでした（更新 ${updateCount} 件、文書の取得 ${readCount} 件。対象外の症例の case_id: ${caseIds.join(',')}）`,
+    'Plugin',
+    'logPluginOutOfTargetSkipped',
+    arg.userName
+  );
+  return Promise.resolve({ statusNum: RESULT.NORMAL_TERMINATION, body: null });
+};
+
 export const executeUpdate = async (arg: {
   updateObjects: updateCheckObject[];
   executeUserId: number;
