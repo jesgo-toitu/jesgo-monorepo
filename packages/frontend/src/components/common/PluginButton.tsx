@@ -9,8 +9,10 @@ import {
 import {
   executePlugin,
   executePluginIgnoringCancel,
+  isLogicalCheckPlugin,
   jesgoPluginColumns,
   PrepareListTargetFunction,
+  runPatientListLogicalCheckPlugin,
   runPatientListOutputPlugin,
 } from '../../common/Plugin';
 import { jesgoCaseDefine } from '../../store/formDataReducer';
@@ -97,6 +99,23 @@ const PluginButton = (props: {
       prepareListTarget
     ) {
       await runPatientListOutputPlugin(
+        plugin,
+        prepareListTarget,
+        setIsLoading,
+        setReload,
+        setOverwriteDialogPlop
+      );
+      return;
+    }
+
+    // 患者リストから実行するロジカルチェックのプラグインは、一覧の全件の症例だけを対象にする
+    // （実行前の確認は出さない。ロジカルチェック以外の一括更新系・新規登録系の対象は変えない）
+    if (
+      pageType === PAGE_TYPE.PATIENT_LIST &&
+      isLogicalCheckPlugin(plugin) &&
+      prepareListTarget
+    ) {
+      await runPatientListLogicalCheckPlugin(
         plugin,
         prepareListTarget,
         setIsLoading,

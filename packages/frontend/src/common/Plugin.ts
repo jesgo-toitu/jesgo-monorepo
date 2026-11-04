@@ -83,6 +83,61 @@ let setIsLoadingGlobal:
 // プラグインの実行中に、症例の文書の取得に失敗したか
 // （患者リストから実行した出力系プラグインで、一部の症例だけの出力を正常な出力として見せないため）
 let packagedDocumentFailed = false;
+/**
+ * 患者リストから実行したロジカルチェックの 1 回の実行に閉じた情報
+ * 書き戻しの関数（updatePatientsDocument）へ実行ごとに渡す。モジュール全体の変数には持たないため、
+ * 時間切れの後も動き続ける前の実行と、後から始めた実行が重なっても、互いの対象の制限を外さない。
+ */
+type LogicalCheckContext = {
+  /** 実行したプラグイン */
+  plugin: jesgoPluginColumns;
+  /** 更新・文書の取得を許す症例（case_id）。'all' は一覧が全症例（絞り込みなし）の場合 */
+  allowedCaseIds: Set<number> | 'all';
+  /** 対象外の症例への要求を適用しなかった件数（まだ知らせていない分）と、その症例（内部の番号） */
+  skipped: { updates: number; reads: number; caseIds: Set<number> };
+  /** プラグインの main が終わったか（終わった後に届いた要求は、届くたびに知らせる） */
+  finished: boolean;
+  setOverwriteDialogPlop: React.Dispatch<
+    React.SetStateAction<OverwriteDialogPlop | undefined>
+  >;
+  setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
+};
+
+/** 実行の情報が、その症例への更新・文書の取得を許すか */
+const isAllowedCase = (context: LogicalCheckContext, caseId: number) =>
+  context.allowedCaseIds === 'all' || context.allowedCaseIds.has(caseId);
+
+/**
+ * 対象外の症例への要求を適用しなかったことを、利用者に知らせて運用ログに残す
+ * （まだ知らせていない分だけ。知らせた分は数え直す）
+ * （患者 ID・氏名・エラー情報の中身は出さない。症例は内部の番号だけをサーバのログに送る）
+ * @param context 実行の情報
+ */
+const reportOutOfTargetSkipped = async (
+  context: LogicalCheckContext
+): Promise<void> => {
+  const { updates, reads } = context.skipped;
+  if (updates === 0 && reads === 0) return;
+  const caseIds = Array.from(context.skipped.caseIds);
+  context.skipped.updates = 0;
+  context.skipped.reads = 0;
+  context.skipped.caseIds.clear();
+  const lines = [
+    '【注意】',
+    `プラグイン「${context.plugin.plugin_name}」が、対象外の症例（実行した時点の患者リストの一覧に含まれない症例）に対する要求を返したため、適用しませんでした。`,
+  ];
+  if (updates > 0) lines.push(`適用しなかった更新：${updates}件`);
+  if (reads > 0) lines.push(`渡さなかった文書の取得：${reads}件`);
+  lines.push('対象外の症例の文書は変更していません。');
+  alert(lines.join('\n'));
+  // 運用ログに残す（失敗しても利用者への通知は済んでいるため、処理は続ける）
+  await apiAccess(METHOD_TYPE.POST, 'plugin-update-skipped', {
+    plugin_id: context.plugin.plugin_id,
+    update_count: updates,
+    read_count: reads,
+    case_ids: caseIds,
+  });
+};
 
 /**
  * 症例の文書を一度に取得する症例の件数の上限
@@ -194,13 +249,16 @@ const getPatientsDocument = async (doc: argDoc) => {
   return JSON.stringify(results);
 };
 
-const getTargetDocument = async (doc: argDoc) => {
+const getTargetDocument = async (
+  doc: argDoc,
+  attachPatientInfo: boolean = pluginData.attach_patient_info
+) => {
   const ret = await GetPackagedDocument(
     doc.caseList,
     undefined,
     doc.targetDocument,
     doc.filterQuery,
-    pluginData.attach_patient_info
+    attachPatientInfo
   );
   if (ret.resCode === RESULT.NORMAL_TERMINATION) {
     return ret.anyValue ? JSON.stringify(ret.anyValue) : undefined;
@@ -209,10 +267,26 @@ const getTargetDocument = async (doc: argDoc) => {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+/**
+ * プラグインからの更新・文書の取得の要求を処理する（更新系プラグインの main に渡す関数）
+ * @param doc 更新の内容、または文書の取得の指定
+ * @param getPackagedDocumentInsted true のときは文書の取得
+ * @param context 患者リストから実行したロジカルチェックの実行の情報（その実行に閉じた対象の制限）。
+ *   指定したときは、モジュール全体の変数（pluginData・targetCaseId など）を使わない
+ */
 const updatePatientsDocument = async (
   doc: updateObject | updateObject[] | argDoc | undefined,
-  getPackagedDocumentInsted = false
+  getPackagedDocumentInsted = false,
+  context: LogicalCheckContext | undefined = undefined
 ) => {
+  // 実行の情報があれば、その実行のプラグイン・画面の関数を使う（後から始めた別の実行に左右されない）
+  const runPlugin = context ? context.plugin : pluginData;
+  const fixedCaseId = context ? undefined : targetCaseId;
+  const setOverwriteDialogPlopForRun = context
+    ? context.setOverwriteDialogPlop
+    : setOverwriteDialogPlopGlobal;
+  const setIsLoadingForRun = context ? context.setIsLoading : setIsLoadingGlobal;
+
   type updateCheckObject = {
     uuid?: string;
     pointer: string;
@@ -279,7 +353,22 @@ const updatePatientsDocument = async (
       );
       return;
     }
-    return await getTargetDocument(doc as argDoc);
+    // 対象の症例が限られている場合（患者リストから実行したロジカルチェック）は、対象外の症例の文書を渡さない
+    if (context) {
+      const requestedCaseId = Number((doc as argDoc).caseList[0]?.case_id);
+      if (!isAllowedCase(context, requestedCaseId)) {
+        context.skipped.reads += 1;
+        if (!Number.isNaN(requestedCaseId)) {
+          context.skipped.caseIds.add(requestedCaseId);
+        }
+        // main が終わった後（時間切れの後など）に届いた要求は、届いた時点で知らせる
+        if (context.finished) {
+          await reportOutOfTargetSkipped(context);
+        }
+        return;
+      }
+    }
+    return await getTargetDocument(doc as argDoc, runPlugin.attach_patient_info);
   }
 
   // スキップフラグ
@@ -288,7 +377,7 @@ const updatePatientsDocument = async (
   // 引数を配列でなければupdateObjectの配列にする(argDocはここで落とす)
   const localUpdateTarget = Array.isArray(doc) ? doc : [doc as updateObject];
 
-  if (pluginData) {
+  if (runPlugin) {
     // 最初に症例IDとドキュメントIDの組み合わせリストを取得する
     const caseIdAndDocIdListRet = await apiAccess(
       METHOD_TYPE.GET,
@@ -327,8 +416,8 @@ const updatePatientsDocument = async (
     for (let index = 0; index < localUpdateTarget.length; index++) {
       const patientItem = localUpdateTarget[index];
       let tempCaseId: number | undefined;
-      if (targetCaseId) {
-        tempCaseId = targetCaseId;
+      if (fixedCaseId) {
+        tempCaseId = fixedCaseId;
       } else if (patientItem.case_id) {
         tempCaseId = patientItem.case_id;
       } else if (patientItem.hash) {
@@ -343,6 +432,37 @@ const updatePatientsDocument = async (
         tempCaseId = caseIdAndDocIdList.find(
           (p) => p.document_id === patientItem.document_id
         )?.case_id;
+      }
+
+      // 対象の症例が限られている場合（患者リストから実行したロジカルチェック）は、
+      // 指定（症例番号・ハッシュ・腫瘍登録番号・文書番号）のどれか 1 つでも対象外の症例を指す更新は適用しない
+      if (tempCaseId && context) {
+        const pointedCaseIds = [
+          patientItem.case_id,
+          patientItem.hash
+            ? caseIdAndHashList.find((p) => p.hash === patientItem.hash)
+                ?.case_id
+            : undefined,
+          patientItem.case_no
+            ? caseIdAndCaseNoList.find((p) => p.caseNo === patientItem.case_no)
+                ?.case_id
+            : undefined,
+          patientItem.document_id
+            ? caseIdAndDocIdList.find(
+                (p) => p.document_id === patientItem.document_id
+              )?.case_id
+            : undefined,
+        ]
+          .filter((id) => id !== undefined && id !== null)
+          .map((id) => Number(id));
+        const outOfTarget = pointedCaseIds.filter(
+          (id) => !isAllowedCase(context, id)
+        );
+        if (outOfTarget.length > 0) {
+          context.skipped.updates += 1;
+          outOfTarget.forEach((id) => context.skipped.caseIds.add(id));
+          tempCaseId = undefined;
+        }
       }
 
       if (tempCaseId) {
@@ -367,11 +487,12 @@ const updatePatientsDocument = async (
         for (const targetKey in obj.target) {
           const newObj: updateObject = {
             document_id: obj.document_id,
-            case_id: targetCaseId,
+            // 対象の症例が限られている場合は、サーバ側でも引き当てた症例の文書に限る
+            case_id: fixedCaseId ?? (context ? key : undefined),
             hash: obj.hash,
             case_no: obj.case_no,
             schema_id: obj.schema_id,
-            schema_ids: pluginData.target_schema_id,
+            schema_ids: runPlugin.target_schema_id,
             target: { [targetKey]: obj.target[targetKey] },
           };
           updateApiObjects.push(newObj);
@@ -480,18 +601,18 @@ const updatePatientsDocument = async (
 
         // チェック用ダイアログ表示処理
         if (
-          setOverwriteDialogPlopGlobal &&
-          setIsLoadingGlobal &&
+          setOverwriteDialogPlopForRun &&
+          setIsLoadingForRun &&
           data.schemaList &&
           data.schemaList.length > 0
         ) {
-          setIsLoadingGlobal(false);
+          setIsLoadingForRun(false);
           const modalRet = await new Promise<{
             result: boolean;
             skip: boolean;
             body: overWriteSchemaInfo[];
           }>((resolve) => {
-            setOverwriteDialogPlopGlobal?.({
+            setOverwriteDialogPlopForRun?.({
               show: true,
               onHide: () => modalHide,
               onClose: resolve,
@@ -500,8 +621,8 @@ const updatePatientsDocument = async (
               data,
             });
           });
-          setOverwriteDialogPlopGlobal?.(undefined);
-          setIsLoadingGlobal(true);
+          setOverwriteDialogPlopForRun?.(undefined);
+          setIsLoadingForRun(true);
           // OKボタンが押されたときのみ処理
           if (modalRet.result) {
             // 以降スキップがONならフラグを立てる
@@ -662,6 +783,11 @@ const updatePatientsDocument = async (
       }
       OpenOutputView(window, csv, 'overwritelog');
     }
+  }
+
+  // main が終わった後（時間切れの後など）に届いた書き戻しで対象外を止めた場合は、届いた時点で知らせる
+  if (context?.finished) {
+    await reportOutOfTargetSkipped(context);
   }
 };
 
@@ -851,10 +977,14 @@ export const moduleImportDocument = async (
   return undefined;
 };
 
-const getDocuments = async (
+/**
+ * 更新系プラグインに渡す文書を取得する
+ * @returns 取得した文書。取得に失敗した場合は undefined
+ */
+const fetchPatientDocuments = async (
   caseId: number | undefined,
   schemaIds: number[] | undefined
-) => {
+): Promise<formDocument[] | undefined> => {
   let param = '';
   if (caseId) {
     param += `?caseId=${caseId}`;
@@ -871,8 +1001,13 @@ const getDocuments = async (
   if (ret.statusNum === RESULT.NORMAL_TERMINATION) {
     return ret.body as formDocument[];
   }
-  return [];
+  return undefined;
 };
+
+const getDocuments = async (
+  caseId: number | undefined,
+  schemaIds: number[] | undefined
+) => (await fetchPatientDocuments(caseId, schemaIds)) ?? [];
 
 const receiveUploadText = async (
   setIsLoading:
@@ -1309,12 +1444,24 @@ export const executePatientListOutputPlugin = async (
 };
 
 /**
- * 患者リストから実行する出力系プラグインの対象症例を決める関数
- * 一覧の全件を集め、実行前の確認を出す。実行しない場合（対象 0 件・取り消し等）は undefined を返す
+ * 患者リストから実行するプラグインの対象症例
+ * 一覧が全症例（検索・絞り込みなし）で、一覧の全件を取り直さなかった場合は、症例は空で allCases を持つ
+ * （allCases は options.allowAllCases を指定したときだけ返る。listTotal は画面の一覧の件数）
+ */
+export interface ListTargetCases extends Array<jesgoCaseDefine> {
+  allCases?: { listTotal: number };
+}
+
+/**
+ * 患者リストから実行するプラグインの対象症例を決める関数
+ * 一覧の全件を集め、実行前の確認を出す（options.confirm が false のときは確認を出さない）。
+ * options.allowAllCases が true で、一覧に検索・絞り込みが効いていない場合は、一覧の全件を取り直さず allCases を返す。
+ * 実行しない場合（対象 0 件・取り消し等）は undefined を返す
  */
 export type PrepareListTargetFunction = (
-  plugin: jesgoPluginColumns
-) => Promise<jesgoCaseDefine[] | undefined>;
+  plugin: jesgoPluginColumns,
+  options?: { confirm?: boolean; allowAllCases?: boolean }
+) => Promise<ListTargetCases | undefined>;
 
 /**
  * 患者リストから出力系プラグインを実行する（プラグイン選択・プラグイングループのダイアログ共通）
@@ -1354,4 +1501,154 @@ export const runPatientListOutputPlugin = async (
     // 患者情報の確認での取り消し、時間切れ、文書の取得失敗は、それぞれ通知済み
     console.warn('プラグインの実行を中断しました:', (e as Error)?.message);
   }
+};
+
+/**
+ * ロジカルチェックのプラグインか否か
+ * 全患者対象・データ更新で、新規登録系でなく（init の newdata が true でない）、
+ * ファイルを読み込まない（アップロードダイアログを表示しない）プラグイン。
+ * 本体から症例の文書を受け取って処理し、結果を文書へ書き戻す一括更新系である。
+ * （プラグインの名前・説明文・番号では判定しない）
+ * @param plugin プラグイン情報
+ */
+export const isLogicalCheckPlugin = (plugin: jesgoPluginColumns): boolean =>
+  plugin.all_patient &&
+  plugin.update_db &&
+  plugin.newdata !== true &&
+  !plugin.show_upload_dialog;
+
+/** ロジカルチェックの文書の取得に失敗したときの通知 */
+const LOGICAL_CHECK_DOCUMENT_FETCH_FAILED =
+  '対象の症例の文書の取得に失敗しました。プラグインは実行していません。\n時間をおいて再度実行してください。';
+
+/**
+ * 患者リストからロジカルチェックのプラグインを実行する（対象は呼び出し元が決めた一覧の症例）
+ * - プラグインには、一覧の症例の文書だけを渡す（文書の並びはサーバが返す順序のまま）
+ * - 文書の取得に失敗した場合は、プラグインを実行しない
+ * - プラグインが対象外の症例への更新・文書の取得を返しても適用せず、件数を知らせる
+ *   （対象の制限はこの実行に閉じた情報〔LogicalCheckContext〕として書き戻しの関数へ渡す。
+ *     時間切れの後に遅れて届いた書き戻しにも、ほかの実行と重なった場合にも、この実行の制限が効く）
+ * @param plugin プラグイン
+ * @param target 対象の症例（一覧の全件）。一覧が全症例（絞り込みなし）の場合は allCases を持つ
+ * @param refetchTarget 一覧の全件を取り直す関数（全症例の扱いの確かめで食い違った場合に使う）
+ * @param setReload
+ * @param setIsLoading
+ * @param setOverwriteDialogPlop
+ */
+export const executePatientListLogicalCheckPlugin = async (
+  plugin: jesgoPluginColumns,
+  target: ListTargetCases,
+  refetchTarget: () => Promise<ListTargetCases | undefined>,
+  setReload: (value: React.SetStateAction<reloadState>) => void,
+  setIsLoading: React.Dispatch<React.SetStateAction<boolean>>,
+  setOverwriteDialogPlop: React.Dispatch<
+    React.SetStateAction<OverwriteDialogPlop | undefined>
+  >
+): Promise<unknown> => {
+  // 対象スキーマの扱いは従来の一括更新系と同じ
+  const allDocuments = await fetchPatientDocuments(
+    undefined,
+    plugin.target_schema_id
+  );
+  if (!allDocuments) {
+    alert(
+      `${LOGICAL_CHECK_DOCUMENT_FETCH_FAILED}\n${PLUGIN_TARGET_MESSAGES.NO_TARGET}`
+    );
+    return undefined;
+  }
+
+  const toIdSet = (cases: jesgoCaseDefine[]) =>
+    new Set(
+      cases.map((p) => Number(p.case_id)).filter((id) => !Number.isNaN(id))
+    );
+
+  let allowedCaseIds: Set<number> | 'all' | undefined;
+  if (target.allCases) {
+    // 一覧が全症例（絞り込みなし）の場合: 一覧を取り直さず、全症例の文書を渡す。
+    // 文書のある症例の数が一覧の件数を超える場合（一覧の表示の後に症例が増えた等）は、一覧の全件を取り直す
+    const documentCaseIds = new Set(allDocuments.map((d) => Number(d.case_id)));
+    if (documentCaseIds.size <= target.allCases.listTotal) {
+      allowedCaseIds = 'all';
+    } else {
+      const refetched = await refetchTarget();
+      if (!refetched || refetched.length === 0) return undefined;
+      allowedCaseIds = toIdSet(refetched);
+    }
+  } else {
+    allowedCaseIds = toIdSet(target);
+  }
+  if (allowedCaseIds !== 'all' && allowedCaseIds.size === 0) {
+    alert(PLUGIN_TARGET_MESSAGES.NO_TARGET);
+    return undefined;
+  }
+  const allowed = allowedCaseIds;
+  const documentList =
+    allowed === 'all'
+      ? allDocuments
+      : allDocuments.filter((d) => allowed.has(Number(d.case_id)));
+
+  // この実行に閉じた情報（モジュール全体の変数には持たない）
+  const context: LogicalCheckContext = {
+    plugin,
+    allowedCaseIds: allowed,
+    skipped: { updates: 0, reads: 0, caseIds: new Set<number>() },
+    finished: false,
+    setOverwriteDialogPlop,
+    setIsLoading,
+  };
+  try {
+    const retValue = await moduleMainUpdate(
+      plugin.script_text,
+      (doc: updateObject | updateObject[] | argDoc | undefined, packaged = false) =>
+        updatePatientsDocument(doc, packaged, context),
+      documentList
+    );
+    setReload({ isReload: true, caller: 'update_plugin' });
+    return retValue;
+  } finally {
+    // main が終わった後に届いた要求も、この実行の制限で止め、届いた時点で知らせる
+    context.finished = true;
+    await reportOutOfTargetSkipped(context);
+  }
+};
+
+/**
+ * 患者リストからロジカルチェックのプラグインを実行する（プラグイン選択・プラグイングループのダイアログ共通）
+ * 対象は一覧の全件（prepareListTarget で決める。実行前の確認は出さない）。
+ * 一覧が 0 件・読み込み前・取得失敗のときは、知らせて実行しない（全症例に戻さない）。
+ * 取り消し・時間切れは通知済みのため、呼び出し元へ伝えない
+ * @param plugin プラグイン
+ * @param prepareListTarget 対象症例を決める関数
+ * @param setIsLoading
+ * @param setReload
+ * @param setOverwriteDialogPlop
+ */
+export const runPatientListLogicalCheckPlugin = async (
+  plugin: jesgoPluginColumns,
+  prepareListTarget: PrepareListTargetFunction,
+  setIsLoading: React.Dispatch<React.SetStateAction<boolean>>,
+  setReload: (value: React.SetStateAction<reloadState>) => void,
+  setOverwriteDialogPlop: React.Dispatch<
+    React.SetStateAction<OverwriteDialogPlop | undefined>
+  >
+): Promise<void> => {
+  // 一覧が全症例（絞り込みなし）の場合は、一覧の全件を取り直さない（allCases で示される）
+  const target = await prepareListTarget(plugin, {
+    confirm: false,
+    allowAllCases: true,
+  });
+  if (!target || (!target.allCases && target.length === 0)) return;
+  await executePluginIgnoringCancel(
+    plugin,
+    () =>
+      executePatientListLogicalCheckPlugin(
+        plugin,
+        target,
+        () => prepareListTarget(plugin, { confirm: false }),
+        setReload,
+        setIsLoading,
+        setOverwriteDialogPlop
+      ),
+    setIsLoading
+  );
 };
