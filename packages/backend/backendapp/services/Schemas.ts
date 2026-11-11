@@ -4,6 +4,7 @@ import { ApiReturnObject, RESULT } from '../logic/ApiCommon';
 import { DbAccess } from '../logic/DbAccess';
 import { formatDateStr, JSONSchema7, JSONSchema7TypeName } from './JsonToDatabase';
 import { PresetFieldData } from './Presets';
+import { buildInheritSchemaMap, expandSchemaPathWithInherit } from '../logic/InheritSchemaPath';
 
 export interface getJsonSchemaBody {
   ids: number[] | undefined;
@@ -1010,10 +1011,17 @@ ORDER BY pf.display_order
 `;
       presetFields = await dbAccess.query(fieldsQuery, [selectedPresetId, isCsvExport]) as PresetFieldData[];
       if (0 < presetFields?.length) {
-        const searchJsons = presetFields.map(presetField => ({
-          schema_path: presetField.schema_path,
-          document_key_path: presetField.property_path
-        }));
+        // 継承スキーマ（例: 手術療法 → 手術療法 詳細）の文書も、継承元のスキーマの文書として探す
+        const inheritRows = (await dbAccess.query(
+          'SELECT DISTINCT schema_id, unnest(inherit_schema) AS inherit_id FROM jesgo_document_schema WHERE inherit_schema IS NOT NULL'
+        )) as { schema_id: number; inherit_id: number }[];
+        const inheritMap = buildInheritSchemaMap(inheritRows);
+        const searchJsons = presetFields.flatMap((presetField) =>
+          expandSchemaPathWithInherit(presetField.schema_path, inheritMap).map((schemaPath) => ({
+            schema_path: schemaPath,
+            document_key_path: presetField.property_path,
+          }))
+        );
         const rootDocumentDatas = await dbAccess.query(
           `SELECT * FROM search_jesgo_document_multiple($1::jsonb, $2::integer[]);`,
           [JSON.stringify(searchJsons), retCases.map((caseDefine) => caseDefine.case_id)]
