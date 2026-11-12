@@ -1,8 +1,8 @@
 diff --git a/node_modules/@types/json-schema/index.d.ts b/node_modules/@types/json-schema/index.d.ts
-index 7a92dec..24dc225 100644
+index 9381e99..1a33697 100644
 --- a/node_modules/@types/json-schema/index.d.ts
 +++ b/node_modules/@types/json-schema/index.d.ts
-@@ -721,6 +721,40 @@ export interface JSONSchema7 {
+@@ -712,6 +712,40 @@ export interface JSONSchema7 {
      readOnly?: boolean | undefined;
      writeOnly?: boolean | undefined;
      examples?: JSONSchema7Type | undefined;
