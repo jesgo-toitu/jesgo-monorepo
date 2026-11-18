@@ -31,6 +31,10 @@ export interface PresetField {
   display_order: number;
   schema_title?: string;
   schema_version?: string;
+  /** 項目選択ツリーで選んだ項目までのスキーマのつながり（先頭は選んだスキーマ、末尾は値を持つスキーマ） */
+  schema_path?: number[] | null;
+  /** 値を持つスキーマの文書の中のパス（配列の要素は '0' などの番号） */
+  property_path?: string[] | null;
 }
 
 // ドキュメント内容の型定義
@@ -40,6 +44,8 @@ export interface DocumentContent {
   schema_id_string: string;
   document: any;
   event_date: string;
+  /** 子の文書の ID（サブスキーマ・子スキーマの文書） */
+  child_documents?: number[];
 }
 
 // 患者情報の型定義
@@ -56,6 +62,18 @@ export interface PatientInfo {
 
 // extractActualValue と getValueFromPath は @jesgo/common からインポート
 // フロントエンドでは extractValue: true（デフォルト）を使用して、値を抽出する
+
+/**
+ * API から受け取った文書の、子の文書の ID（value.child_documents）を数値の配列にする
+ * @param docObj API から受け取った文書
+ * @returns 文書の ID の配列（無ければ空）
+ */
+const toDocumentIdList = (docObj: unknown): number[] => {
+  const childDocuments = (docObj as { value?: { child_documents?: unknown } } | null)?.value?.child_documents;
+  return Array.isArray(childDocuments)
+    ? childDocuments.map((id) => Number(id)).filter((id) => !Number.isNaN(id))
+    : [];
+};
 
 /**
  * 患者のドキュメントを取得して変換
@@ -82,7 +100,8 @@ export const transformDocuments = (documents: any[]): DocumentContent[] => {
           schema_id: docObj.value.schema_id || 0,
           schema_id_string: schemaIdString,
           event_date: docObj.value.event_date || '',
-          document: docObj.value.document || {}
+          document: docObj.value.document || {},
+          child_documents: toDocumentIdList(docObj as unknown),
         });
       }
     }
@@ -90,6 +109,107 @@ export const transformDocuments = (documents: any[]): DocumentContent[] => {
   
   return transformedDocuments;
 };
+
+/**
+ * スキーマ ID と、そのスキーマを継承するスキーマ（inherit_schema）の ID の一覧を返す
+ * 例: 手術療法の ID → [手術療法, 手術療法 詳細]
+ * @param schemaId スキーマ ID
+ * @returns スキーマ ID の一覧（先頭は schemaId）
+ */
+const getSchemaIdsWithInherit = (schemaId: number): number[] => {
+  const ids = [schemaId];
+  try {
+    const schemaInfo = GetSchemaInfo(schemaId);
+    if (schemaInfo && Array.isArray(schemaInfo.inherit_schema)) {
+      schemaInfo.inherit_schema.forEach((inheritId) => {
+        if (!ids.includes(inheritId)) ids.push(inheritId);
+      });
+    }
+  } catch (error) {
+    // スキーマ情報が取れない場合は、そのスキーマ ID だけを使う
+  }
+  return ids;
+};
+
+/**
+ * プリセット項目のスキーマのつながり（schema_path）に沿って、行の文書の中から値の元になる文書を探す
+ * 先頭のスキーマ（継承スキーマを含む）の文書から、子の文書（child_documents）を schema_path の順にたどる。
+ * スキーマの ID とつながりで探すため、がん種によらず、別のスキーマの同じ名前の項目の値は混ざらない。
+ * @param field プリセット項目
+ * @param documents 行の文書（ルート文書とその下の文書）
+ * @returns 値の元になる文書。schema_path・property_path が無い項目（つながりが分からない項目）は null
+ */
+export const resolveDocumentsBySchemaPath = (
+  field: PresetField,
+  documents: DocumentContent[]
+): DocumentContent[] | null => {
+  const schemaPath = field.schema_path;
+  if (
+    !Array.isArray(schemaPath) ||
+    schemaPath.length === 0 ||
+    !Array.isArray(field.property_path) ||
+    field.property_path.length === 0
+  ) {
+    return null;
+  }
+  const schemaIds = schemaPath.map((id) => Number(id));
+  if (schemaIds.some((id) => Number.isNaN(id))) return null;
+
+  const firstIds = getSchemaIdsWithInherit(schemaIds[0]);
+  const first = documents.filter((doc) => firstIds.includes(doc.schema_id));
+  // 2 番目以降のスキーマは、1 つ前の文書の子の文書の中から探す
+  return schemaIds.slice(1).reduce((current, schemaId) => {
+    if (current.length === 0) return current;
+    const allowedIds = getSchemaIdsWithInherit(schemaId);
+    const childIds = new Set<number>(current.flatMap((doc) => doc.child_documents || []));
+    return documents.filter(
+      (doc) => childIds.has(doc.document_id) && allowedIds.includes(doc.schema_id)
+    );
+  }, first);
+};
+
+/**
+ * 配列の要素を含むパス（例: ['術者[0]', '名前']）で、文書から値を集める
+ * [n] の付いた部分は、番号によらず配列のすべての要素をたどる（要素の順）。
+ * 値そのものが配列の場合は、その要素を順に並べる。
+ * @param current たどっている途中の値（最初は文書）
+ * @param parts パスを「.」で分けたもの
+ * @returns 集めた値（見つからなければ空）
+ */
+const collectArrayPathValues = (current: unknown, parts: string[]): unknown[] => {
+  if (current === null || current === undefined) return [];
+  if (parts.length === 0) return Array.isArray(current) ? current : [current];
+  const [part, ...rest] = parts;
+  const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  const arrayIndexMatch = part.match(/^(.+?)\[(\d+)\]$/);
+  if (arrayIndexMatch) {
+    const propertyName = arrayIndexMatch[1];
+    if (!isPlainObject(current) || !(propertyName in current)) return [];
+    const arrayValue = current[propertyName];
+    return Array.isArray(arrayValue)
+      ? arrayValue.flatMap((element: unknown) => collectArrayPathValues(element, rest))
+      : [];
+  }
+  if (isPlainObject(current)) return part in current ? collectArrayPathValues(current[part], rest) : [];
+  // 番号の付かない部分が配列の場合は、従来どおり最初の要素を使う
+  if (Array.isArray(current) && current.length > 0 && isPlainObject(current[0]) && part in current[0]) {
+    return collectArrayPathValues(current[0][part], rest);
+  }
+  return [];
+};
+
+/**
+ * 文書の中のパス（property_path）を、値の取り出しに使うパスの文字列にする
+ * 例: ['術者', '0', '役割'] → '術者[0].役割'
+ * @param propertyPath 文書の中のパス
+ * @returns パスの文字列
+ */
+export const propertyPathToFieldPath = (propertyPath: string[]): string =>
+  propertyPath.reduce((acc, part) => {
+    if (acc === '') return part;
+    return /^\d+$/.test(part) ? `${acc}[${part}]` : `${acc}.${part}`;
+  }, '');
 
 /**
  * 診断を取得（がん種から）- PresetDocumentTestViewと同じロジック
@@ -608,6 +728,10 @@ export const formatPatientRow = (
     lastUpdate: patient.lastUpdate,
   };
   
+  // 同じ項目名のカスタム項目が複数ある場合（例: がん種ごとの初回治療開始日）、行の値は項目名で持つため、
+  // それぞれの項目で集めた値を合わせて持つ（後の項目の空の値で、前の項目の値を消さない）
+  const customValuesByName = new Map<string, string[]>();
+
   // 表示用の場合は、is_visible=trueのフィールドのみをフィルタリングして処理を高速化
   // CSV出力用（includeInvisible=true）の場合は全フィールドを処理
   const fieldsToProcess = includeInvisible 
@@ -674,8 +798,16 @@ export const formatPatientRow = (
       //     operation スキーマにも child_schema がある場合は、さらに再帰的に探索
       let targetSchemaIdString: string | null = null;
       let actualFieldPath = field.field_path;
-      
-      if (field.field_path.includes('.')) {
+
+      // スキーマのつながり（schema_path）と文書の中のパス（property_path）を持つ項目は、それで文書とパスを決める
+      // （項目選択ツリーで選んだ項目。がん種を問わず、子スキーマ・サブスキーマ・継承スキーマの文書をたどる）
+      const resolvedDocuments = resolveDocumentsBySchemaPath(field, documents);
+      const resolvedPath =
+        resolvedDocuments !== null && field.property_path
+          ? propertyPathToFieldPath(field.property_path)
+          : null;
+
+      if (resolvedDocuments === null && field.field_path.includes('.')) {
         const pathParts = field.field_path.split('.');
         if (pathParts.length >= 2) {
           // field.schema_id_string からがん種を推測（例: /schema/CC/root -> CC）
@@ -859,7 +991,9 @@ export const formatPatientRow = (
       
       // 対象となるドキュメントを取得
       const targetDocuments: DocumentContent[] = [];
-      if (targetSchemaIdString) {
+      if (resolvedDocuments !== null) {
+        targetDocuments.push(...resolvedDocuments);
+      } else if (targetSchemaIdString) {
         // targetSchemaIdString で一致するドキュメントを取得
         const matchingDocs = documents.filter(doc => doc.schema_id_string === targetSchemaIdString);
         targetDocuments.push(...matchingDocs);
@@ -895,63 +1029,21 @@ export const formatPatientRow = (
       // すべてのドキュメントから値を取得
       for (const doc of targetDocuments) {
         // targetSchemaIdString が特定されている場合は actualFieldPath を使用、そうでない場合は元の field_path を使用
-        let pathToUse = targetSchemaIdString ? actualFieldPath : field.field_path;
+        let pathToUse: string = resolvedPath ?? (targetSchemaIdString ? actualFieldPath : field.field_path);
         
-        // 配列インデックスを含むパスを処理（例: 術者[0].名前 -> 術者 にアクセスしてから [0] を処理）
-        // getValueFromPath は配列インデックスを直接処理できないため、事前に処理する
+        // 配列の項目（パスに [n] を含む。例: 術者[0].名前）は、その配列のすべての要素の値を、要素の順に集める
+        // （重複は除かない。値の無い要素は飛ばす）
         if (pathToUse && pathToUse.includes('[') && pathToUse.includes(']')) {
-          // 配列インデックスを含むパスを解析
-          const parts = pathToUse.split('.');
-          let current = doc.document;
-          
-          for (let i = 0; i < parts.length; i++) {
-            const part = parts[i];
-            const arrayIndexMatch = part.match(/^(.+?)\[(\d+)\]$/);
-            
-            if (arrayIndexMatch) {
-              // 配列インデックスを含むパス（例: 術者[0]）
-              const propertyName = arrayIndexMatch[1];
-              const arrayIndex = parseInt(arrayIndexMatch[2], 10);
-              
-              if (current && typeof current === 'object' && !Array.isArray(current) && propertyName in current) {
-                const arrayValue = current[propertyName];
-                if (Array.isArray(arrayValue) && arrayValue.length > arrayIndex) {
-                  current = arrayValue[arrayIndex];
-                } else {
-                  current = null;
-                  break;
-                }
-              } else {
-                current = null;
-                break;
-              }
-            } else {
-              // 通常のプロパティ
-              if (current && typeof current === 'object' && !Array.isArray(current) && part in current) {
-                current = current[part];
-              } else if (Array.isArray(current) && current.length > 0) {
-                // 配列の場合は最初の要素を使用
-                current = current[0];
-                if (current && typeof current === 'object' && part in current) {
-                  current = current[part];
-                } else {
-                  current = null;
-                  break;
-                }
-              } else {
-                current = null;
-                break;
-              }
+          const leafValues = collectArrayPathValues(doc.document, pathToUse.split('.'));
+          leafValues.forEach((leaf) => {
+            const extractedValue: unknown = extractActualValue(leaf);
+            if (extractedValue !== null && extractedValue !== undefined && extractedValue !== '') {
+              // オブジェクトのままの値は、内部の表記にせず「項目: 値」の形にする
+              collectedValues.push(
+                typeof extractedValue === 'object' ? formatObjectToString(extractedValue) : extractedValue
+              );
             }
-          }
-          
-          // 値を抽出
-          if (current !== null && current !== undefined) {
-            const extractedValue = extractActualValue(current);
-            if (extractedValue !== null && extractedValue !== undefined) {
-              collectedValues.push(extractedValue);
-            }
-          }
+          });
           continue; // 次のドキュメントへ
         }
         
@@ -1025,11 +1117,15 @@ export const formatPatientRow = (
       }
       
       // 集約した値を結合して表示（区切り文字は「・」）
-      if (collectedValues.length > 0) {
-        row[field.field_name] = collectedValues.join(SEPARATORS.STAGE);
-      } else {
-        row[field.field_name] = '';
-      }
+      // 同じ項目名の前の項目で集めた値と合わせる（この項目で集めた値の並び・重複の扱いは変えない）
+      const previousValues = customValuesByName.get(field.field_name) || [];
+      const ownValues = collectedValues.map((value) => String(value));
+      const mergedValues = [
+        ...previousValues,
+        ...ownValues.filter((value) => !previousValues.includes(value)),
+      ];
+      customValuesByName.set(field.field_name, mergedValues);
+      row[field.field_name] = mergedValues.length > 0 ? mergedValues.join(SEPARATORS.STAGE) : '';
     } else if (!field.is_fixed) {
       row[field.field_name] = '';
     }
@@ -1037,6 +1133,40 @@ export const formatPatientRow = (
   
   return row;
 };
+
+/**
+ * CSV の値の中の「"」を「""」に逃がす（CSV の部品は値を「"」で囲むだけで、中の「"」を逃がさないため）
+ * 文字列以外の値（数値など）はそのまま返す。配列は CSV の部品と同じく「,」で連結した文字列として扱う
+ * @param value CSV のセルの値
+ * @returns 逃がした値
+ */
+export const escapeCsvValue = (value: unknown): unknown => {
+  if (typeof value === 'string') return value.replace(/"/g, '""');
+  if (Array.isArray(value)) return value.join(',').replace(/"/g, '""');
+  return value;
+};
+
+/**
+ * CSV の行（キーと値のオブジェクト）の値の中の「"」を逃がす
+ * @param rows CSV の行
+ * @returns 逃がした行（元の行は変えない）
+ */
+export const escapeCsvRows = (rows: object[]): object[] =>
+  rows.map((row) =>
+    Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [key, escapeCsvValue(value)])
+    )
+  );
+
+/**
+ * CSV の見出しの中の「"」を逃がす
+ * @param headers CSV の見出し
+ * @returns 逃がした見出し（元の見出しは変えない）
+ */
+export const escapeCsvHeaders = (
+  headers: Array<{ label: string; key: string }>
+): Array<{ label: string; key: string }> =>
+  headers.map((header) => ({ ...header, label: String(escapeCsvValue(header.label)) }));
 
 /**
  * formatPatientRowの結果をCSV出力用に変換する関数

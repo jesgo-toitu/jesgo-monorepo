@@ -42,7 +42,7 @@ import SearchDateComponent, {
 } from '../components/common/SearchDateComponent';
 import { reloadState } from './Registration';
 import { LoadPluginList } from '../common/DBUtility';
-import { PresetField, DocumentContent, PatientInfo, transformDocuments, formatPatientRow, convertToCsvFormat } from '../common/PresetPatientDisplay';
+import { PresetField, DocumentContent, PatientInfo, transformDocuments, formatPatientRow, convertToCsvFormat, escapeCsvRows, escapeCsvHeaders } from '../common/PresetPatientDisplay';
 import { GetSchemaInfo } from '../components/CaseRegistration/SchemaUtility';
 import {
   INITIAL_SEARCH_WORD,
@@ -1056,8 +1056,9 @@ const Patients = () => {
         }
       }
       
-      setCsvData(newData);
-      setCsvHeaders(headers);
+      // CSV の値・見出しの中の「"」を「""」に逃がす（プリセット表示・通常表示とも。値に「"」があっても CSV の構造が崩れないように）
+      setCsvData(escapeCsvRows(newData as object[]));
+      setCsvHeaders(escapeCsvHeaders(headers));
     };
     
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -2258,10 +2259,11 @@ const Patients = () => {
               onClick={() => {
                 // eslint-disable-next-line
                 if (confirm('CSVファイルをダウンロードしますか？')) {
+                  // ファイル名に拡張子 .csv を付ける（ブラウザによって拡張子が付かないため）
                   setCsvFileName(
                     `jesgo_patients_list_${formatDate(new Date())}_${formatTime(
                       new Date()
-                    )}`
+                    )}.csv`
                   );
                   return true;
                 }
