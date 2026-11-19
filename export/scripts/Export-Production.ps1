@@ -26,7 +26,6 @@ Set-Variable -Name 'EXPORT_PACKAGES' -Value @(
     ExportItems = @('dist', 'image', 'package.json', 'start.js', 'config.js')
   }
 ) -Option Constant -Scope Script
-Set-Variable -Name 'REMOVE_NODE_MODULES' -Value @('@react-icons', '@mui') -Option Constant -Scope Script
 #### インポート
 . "$UTILS_PATH"
 #### 配布資源作成
@@ -75,7 +74,7 @@ try {
     Install-NodeModules -PackageDir "$packageDir" -Options @("$commonPackPath", '--no-save')
     ## 配布用依存関係の出力
     Write-Host "$($_.PackageName)のnode_modulesを出力中..." -ForegroundColor Green
-    Export-NodeModules -RootDir "$ROOT_DIR" -PackageDir "$packageDir" -ExportDir "$exportDir"
+    Export-NodeModules -RootDir "$ROOT_DIR" -PackageDir "$packageDir" -ExportDirName $_.ExportDirName -ExportDir "$exportDir"
   }
   ### 4. 作業用ディレクトリの削除
   Remove-Item -Path "$commonPackPath" -Force -ErrorAction Stop
