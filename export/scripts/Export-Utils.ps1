@@ -24,8 +24,8 @@
     if (Test-Path "$inputDir" -PathType Container) {
       $confirm = $null
       while ($null -eq $confirm) {
-        $input = Read-Host '指定したディレクトリは既に存在しますが、よろしいですか。(y/n)'
-        switch ($input.ToLower()) {
+        $userInput = Read-Host '指定したディレクトリは既に存在しますが、よろしいですか。(y/n)'
+        switch ($userInput.ToLower()) {
           'y' { $confirm = $true }
           'n' { $confirm = $false }
         }
@@ -145,38 +145,29 @@ function Export-NodeModules {
     [string] $PackageDir,
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
+    [string] $ExportDirName,
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
     [string] $ExportDir
   )
   $exportNodeModulesDir = Join-Path -Path "$ExportDir" -ChildPath 'node_modules'
+  New-Item "$exportNodeModulesDir" -ItemType Directory -Force -ErrorAction Stop
+  $modulesPath = Join-Path -Path "$RootDir" -ChildPath "export\resource\$ExportDirName\node_modules.txt"
+  $modules = Get-Content "$modulesPath" -ErrorAction Stop
   ## [root]
   $rootNodeModulesDir = Join-Path -Path "$RootDir" -ChildPath 'node_modules'
-  Copy-Item -Path "$rootNodeModulesDir" -Destination "$ExportDir" -Force -Recurse -ErrorAction Stop
-  Remove-NodeModules -NodeModulesDir "$rootNodeModulesDir" -ExportNodeModulesDir "$exportNodeModulesDir"
+  $modules | ForEach-Object {
+    $moduleDir = Join-Path -Path "$rootNodeModulesDir" -ChildPath "$_"
+    if (Test-Path "$moduleDir" -PathType Container) {
+      Copy-Item -Path "$moduleDir" -Destination "$exportNodeModulesDir" -Force -Recurse -ErrorAction Stop
+    }
+  }
   # [package]
   $packageNodeModulesDir = Join-Path -Path "$PackageDir" -ChildPath 'node_modules'
-  Copy-Item -Path $packageNodeModulesDir -Destination "$ExportDir" -Force -Recurse -ErrorAction Stop
-  Remove-NodeModules -NodeModulesDir "$packageNodeModulesDir" -ExportNodeModulesDir "$exportNodeModulesDir" 
-}
-function Remove-NodeModules {
-  param (
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string] $NodeModulesDir,
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string] $ExportNodeModulesDir
-  )
-  $absDir = [System.IO.Path]::GetFullPath($NodeModulesDir)
-  $absExportDir = [System.IO.Path]::GetFullPath($ExportNodeModulesDir)
-  $excludeModuleDirs = @(Get-ChildItem -Path "$absDir" -Recurse | Where-Object { $null -ne $_.LinkType } | ForEach-Object { $_.FullName })
-  # LinkType型moduleの削除
-  $excludeModuleDirs | ForEach-Object {
-    $exportModuleDir = $_.Replace($absDir, $absExportDir)
-    if (-not (Test-Path "$exportModuleDir" -PathType Container)) { throw "依存関係が存在しません。($exportModuleDir)"}
-    Remove-Item -Path "$exportModuleDir" -Force -Recurse -ErrorAction Stop
+  $modules | ForEach-Object {
+    $moduleDir = Join-Path -Path "$packageNodeModulesDir" -ChildPath "$_"
+    if (Test-Path "$moduleDir" -PathType Container) {
+      Copy-Item -Path "$moduleDir" -Destination "$exportNodeModulesDir" -Force -Recurse -ErrorAction Stop
+    }
   }
-  # 配布不要フォルダの削除
-  (Get-ChildItem -Path "$absExportDir" -Directory) |
-    Where-Object { (Get-ChildItem -Path "$($_.FullName)" -Recurse -File).Count -eq 0 -or $REMOVE_NODE_MODULES -contains $_.Name} |
-      Remove-Item -Force -Recurse -ErrorAction Stop
 }
